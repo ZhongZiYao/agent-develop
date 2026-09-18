@@ -1,0 +1,56 @@
+# Claude Code
+.claude/settings.local.json
+.claude/projects/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+
+# 虚拟环境
+venv/
+env/
+.venv/
+ENV/
+
+# 数据与模型权重（不 commit）
+data/chroma/
+data/bm25/
+data/processed/
+*.bin
+*.safetensors
+*.pkl
+*.parquet
+
+# 环境变量
+.env
+.env.local
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# 日志
+*.log
+logs/
+
+# Streamlit
+.streamlit/secrets.toml
+
+# LangSmith
+langsmith.db

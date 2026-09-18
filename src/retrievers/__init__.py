@@ -1,0 +1,1 @@
+"""Retriever 模块 — 召回策略（向量 / BM25 / Hybrid）"""
