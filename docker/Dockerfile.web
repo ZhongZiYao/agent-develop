@@ -1,24 +1,42 @@
-# ===== 前端 Dockerfile =====
-FROM node:20-alpine AS builder
+# ===== 前端 Dockerfile（多阶段构建）=====
+FROM node:20-alpine AS deps
+
+# 国内 npm 镜像加速（可选，如不需要可去掉）
+# RUN npm config set registry https://registry.npmmirror.com
 
 WORKDIR /app
 COPY web/package*.json ./
-RUN npm ci
+RUN npm install --no-audit --no-fund
+
+# ===== 构建阶段 =====
+FROM node:20-alpine AS builder
+WORKDIR /app
+
+ENV NEXT_TELEMETRY_DISABLED=1
+
+COPY --from=deps /app/node_modules ./node_modules
 COPY web/ ./
+
 RUN npm run build
 
-# Runtime
+# ===== 运行阶段 =====
 FROM node:20-alpine AS runner
 WORKDIR /app
 
-ENV NODE_ENV=production
-ENV NEXT_PUBLIC_API_BASE=http://localhost:8000
+ENV NODE_ENV=production \
+    NEXT_TELEMETRY_DISABLED=1 \
+    NEXT_PUBLIC_API_BASE=http://localhost:8000
 
-COPY --from=builder /app/.next ./.next
+# 非 root 用户（安全）
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 nextjs
+
 COPY --from=builder /app/public ./public
-COPY --from=builder /app/package*.json ./
-COPY --from=builder /app/next.config.js ./
-RUN npm ci --omit=dev
+COPY --from=builder --chown=nextjs:nodejs /app/.next ./.next
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/package.json ./package.json
 
+USER nextjs
 EXPOSE 3000
+
 CMD ["npm", "start"]

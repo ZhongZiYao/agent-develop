@@ -1,4 +1,9 @@
-version: "3.9"
+# Docker Compose 一键启动
+# 用法：
+#   1) 确认宿主机的 Ollama 已在跑（http://localhost:11434）
+#   2) 把 .env.example 复制为 .env 并填入 LLM_API_KEY
+#   3) docker compose up -d
+#   4) 浏览器打开 http://localhost:3000
 
 services:
   # ===== 后端 API =====
@@ -6,18 +11,20 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.api
+    image: gameguide-api:latest
     container_name: gameguide-api
     ports:
       - "8000:8000"
     volumes:
+      # 挂载数据目录（包含 Chroma 持久化和原始语料）
       - ./data:/app/data
-      - ./.env:/app/.env
+      # 挂载 .env（必须真实文件，不能用 example）
+      - ./.env:/app/.env:ro
     environment:
+      # 让容器内的 API 访问宿主机的 Ollama
       - OLLAMA_BASE_URL=http://host.docker.internal:11434
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    depends_on:
-      - ollama
     restart: unless-stopped
 
   # ===== 前端 Web =====
@@ -25,24 +32,30 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.web
+    image: gameguide-web:latest
     container_name: gameguide-web
     ports:
       - "3000:3000"
     environment:
+      # 浏览器访问后端的地址（用户视角，是 localhost）
       - NEXT_PUBLIC_API_BASE=http://localhost:8000
     depends_on:
       - api
     restart: unless-stopped
 
-  # ===== Ollama（可选） =====
-  ollama:
-    image: ollama/ollama:latest
-    container_name: gameguide-ollama
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama_data:/root/.ollama
-    restart: unless-stopped
-
-volumes:
-  ollama_data:
+# 注意：Ollama 服务不打包进 compose
+# 原因：你本机已经在跑 Ollama，bge-m3 模型已下载
+# 让容器通过 host.docker.internal 访问宿主机的 Ollama
+# 如果将来想完全容器化，把下面的 ollama service 取消注释即可：
+#
+#   ollama:
+#     image: ollama/ollama:latest
+#     container_name: gameguide-ollama
+#     ports:
+#       - "11434:11434"
+#     volumes:
+#       - ollama_data:/root/.ollama
+#     restart: unless-stopped
+#
+# volumes:
+#   ollama_data:
