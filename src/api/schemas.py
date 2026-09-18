@@ -28,6 +28,8 @@ class RetrievedDoc(BaseModel):
 class QueryResponse(BaseModel):
     """问答响应"""
     answer: str
+    thinking: str = ""  # 模型思考过程（<think>...</think> 剥离出来的）
+    has_thinking: bool = False
     retrieved_docs: list[RetrievedDoc]
     citations: list[int] = []
     trace_id: str

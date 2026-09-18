@@ -114,6 +114,7 @@ async def query(req: QueryRequest):
 
         # 3. 生成
         from ..llm import get_llm
+        from ..prompts.thinking_parser import parse_thinking
 
         llm = get_llm()
         messages = [
@@ -121,6 +122,10 @@ async def query(req: QueryRequest):
             HumanMessage(content=build_user_prompt(req.query, context_chunks, req.game or "")),
         ]
         response = llm.invoke(messages)
+
+        # 剥离 <think>...</think> 块
+        raw_content = response.content
+        clean_answer, thinking_content = parse_thinking(raw_content)
 
         usage = {}
         if hasattr(response, "response_metadata") and response.response_metadata:
@@ -135,7 +140,7 @@ async def query(req: QueryRequest):
         retrieved_docs, _ = _retrieve_to_response(results, req.top_n)
 
         return QueryResponse(
-            answer=response.content,
+            answer=clean_answer or raw_content,  # 兜底：剥离失败就用原文
             retrieved_docs=retrieved_docs,
             citations=[],  # Phase 2 解析 [1]、[2] 标注
             trace_id=trace_id,
@@ -175,22 +180,41 @@ async def stream(req: QueryRequest):
             # 2. 构造 context
             context_chunks, _ = build_context(results, top_n=req.top_n)
 
-            # 3. 流式生成
+            # 3. 流式生成（带 thinking 解析）
+            from ..prompts.thinking_parser import StreamThinkingParser
+
             llm = get_streaming_llm()
             messages = [
                 SystemMessage(content=SYSTEM_PROMPT),
                 HumanMessage(content=build_user_prompt(req.query, context_chunks, req.game or "")),
             ]
 
+            parser = StreamThinkingParser()
             full_answer = ""
+            full_thinking = ""
+
             async for chunk in llm.astream(messages):
                 if chunk.content:
-                    full_answer += chunk.content
-                    yield {
-                        "event": "generation",
-                        "data": json.dumps({"delta": chunk.content}, ensure_ascii=False),
-                    }
-                    await asyncio.sleep(0)  # 让出事件循环
+                    # 用状态机分流 thinking / answer
+                    answer_delta, thinking_delta = parser.feed(chunk.content)
+                    if thinking_delta:
+                        full_thinking += thinking_delta
+                        yield {
+                            "event": "thinking",
+                            "data": json.dumps({"delta": thinking_delta}, ensure_ascii=False),
+                        }
+                    if answer_delta:
+                        full_answer += answer_delta
+                        yield {
+                            "event": "generation",
+                            "data": json.dumps({"delta": answer_delta}, ensure_ascii=False),
+                        }
+                    await asyncio.sleep(0)
+
+            # 流结束：兜底刷出残留 thinking
+            flush_thinking = parser.flush()
+            if flush_thinking:
+                full_thinking += flush_thinking
 
             # 4. 完成事件
             retrieved_docs, _ = _retrieve_to_response(results, req.top_n)
@@ -199,6 +223,8 @@ async def stream(req: QueryRequest):
                 "data": json.dumps(
                     {
                         "answer": full_answer,
+                        "thinking": full_thinking,
+                        "has_thinking": bool(full_thinking),
                         "retrieved_docs": [d.model_dump() for d in retrieved_docs],
                         "usage": {},
                     },

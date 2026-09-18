@@ -1,9 +1,14 @@
-# Docker Compose 一键启动
+# Docker Compose 一键启动（开发模式，全热加载）
 # 用法：
 #   1) 确认宿主机的 Ollama 已在跑（http://localhost:11434）
 #   2) 把 .env.example 复制为 .env 并填入 LLM_API_KEY
-#   3) docker compose up -d
+#   3) docker compose up -d --build
 #   4) 浏览器打开 http://localhost:3000
+#
+# 热加载说明：
+#   - api 容器：源代码挂载 + uvicorn --reload
+#   - web 容器：源代码挂载 + next dev（HMR）
+#   - 修改文件后会自动生效，无需重启
 
 services:
   # ===== 后端 API =====
@@ -11,18 +16,26 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.api
-    image: gameguide-api:latest
+    image: gameguide-api:dev
     container_name: gameguide-api
     ports:
       - "8000:8000"
     volumes:
-      # 挂载数据目录（包含 Chroma 持久化和原始语料）
+      # 数据目录（包含 Chroma 持久化）
       - ./data:/app/data
-      # 挂载 .env（必须真实文件，不能用 example）
+      # .env（必须真实文件，不能用 example）
       - ./.env:/app/.env:ro
+      # 源代码热加载（开发模式）
+      - ./src:/app/src
+    command: >
+      uvicorn src.api.main:app
+        --host 0.0.0.0
+        --port 8000
+        --reload
+        --reload-dir /app/src
     environment:
-      # 让容器内的 API 访问宿主机的 Ollama
       - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      - WATCHFILES_FORCE_POLLING=true
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
@@ -32,13 +45,25 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.web
-    image: gameguide-web:latest
+    image: gameguide-web:dev
     container_name: gameguide-web
     ports:
       - "3000:3000"
+    volumes:
+      # 源代码热加载（HMR）
+      - ./web/src:/app/src
+      - ./web/public:/app/public
+      # next.config.js 也挂载
+      - ./web/next.config.js:/app/next.config.js
+      - ./web/tailwind.config.js:/app/tailwind.config.js
+      - ./web/postcss.config.js:/app/postcss.config.js
+      - ./web/tsconfig.json:/app/tsconfig.json
+      # node_modules 不能挂载（容器内装的版本不同），用匿名卷保护
+      - /app/node_modules
     environment:
-      # 浏览器访问后端的地址（用户视角，是 localhost）
       - NEXT_PUBLIC_API_BASE=http://localhost:8000
+      - WATCHPACK_POLLING=true
+      - CHOKIDAR_USEPOLLING=true
     depends_on:
       - api
     restart: unless-stopped

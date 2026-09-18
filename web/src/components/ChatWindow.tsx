@@ -4,11 +4,13 @@ import { useEffect, useRef, useState } from "react";
 import { Send, Loader2, BookOpen, Sparkles } from "lucide-react";
 import { query, streamQuery, RetrievedDoc } from "@/lib/api";
 import { Markdown } from "./Markdown";
+import { ThinkingPanel } from "./ThinkingPanel";
 
 interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
+  thinking?: string;
   retrieved_docs?: RetrievedDoc[];
   streaming?: boolean;
   latency_ms?: number;
@@ -106,6 +108,7 @@ export function ChatWindow({ game, useStream, topK, topN }: Props) {
   async function handleStream(queryText: string, assistantId: string) {
     let fullAnswer = "";
     let retrievedDocs: RetrievedDoc[] = [];
+    let fullThinking = "";
 
     for await (const event of streamQuery({
       query: queryText,
@@ -113,7 +116,14 @@ export function ChatWindow({ game, useStream, topK, topN }: Props) {
       top_k: topK,
       top_n: topN,
     })) {
-      if (event.event === "generation") {
+      if (event.event === "thinking") {
+        fullThinking += (event.data.delta as string) || "";
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId ? { ...m, thinking: fullThinking } : m
+          )
+        );
+      } else if (event.event === "generation") {
         fullAnswer += (event.data.delta as string) || "";
         setMessages((prev) =>
           prev.map((m) =>
@@ -128,6 +138,7 @@ export function ChatWindow({ game, useStream, topK, topN }: Props) {
               ? {
                   ...m,
                   content: fullAnswer,
+                  thinking: fullThinking,
                   retrieved_docs: retrievedDocs,
                   streaming: false,
                 }
@@ -237,6 +248,15 @@ function MessageBubble({ message }: { message: Message }) {
         </div>
       )}
       <div className={`flex flex-col max-w-2xl ${isUser ? "items-end" : "items-start"}`}>
+        {/* Thinking Panel（仅 assistant 显示） */}
+        {!isUser && (message.thinking || message.streaming) && (
+          <ThinkingPanel
+            thinking={message.thinking || ""}
+            isStreaming={message.streaming && !message.thinking}
+            className="mb-1"
+          />
+        )}
+
         <div
           className={`px-4 py-3 rounded-2xl ${
             isUser
@@ -244,7 +264,7 @@ function MessageBubble({ message }: { message: Message }) {
               : "bg-white border border-gray-200 text-gray-900"
           }`}
         >
-          <div className={`prose prose-sm max-w-none ${message.streaming ? "streaming-cursor" : ""}`}>
+          <div className={`prose prose-sm max-w-none ${message.streaming && !message.thinking ? "streaming-cursor" : ""}`}>
             {message.content ? (
               <Markdown
                 text={message.content}

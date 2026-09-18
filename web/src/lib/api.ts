@@ -13,6 +13,8 @@ export interface RetrievedDoc {
 
 export interface QueryResponse {
   answer: string;
+  thinking?: string;
+  has_thinking?: boolean;
   retrieved_docs: RetrievedDoc[];
   citations: number[];
   trace_id: string;
