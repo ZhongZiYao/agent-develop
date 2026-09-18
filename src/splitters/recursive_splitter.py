@@ -129,7 +129,7 @@ def split_documents(
     """批量切分"""
     all_chunks = []
     for doc in docs:
-        from .markdown_loader import make_doc_id
+        from ..loaders.markdown_loader import make_doc_id
 
         doc_id = make_doc_id(doc.content, doc.source)
         chunks = split_document(doc, chunk_size, chunk_overlap, doc_id)
