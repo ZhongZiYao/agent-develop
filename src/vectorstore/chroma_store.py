@@ -112,8 +112,11 @@ class VectorStore:
         """清空 collection（慎用）"""
         client = get_chroma_client()
         client.delete_collection(settings.chroma_collection_name)
-        # 清缓存
+        # 清两个缓存：
+        # 1) get_vector_store 函数的 lru_cache
+        # 2) VectorStore 实例的 _collection 属性
         get_vector_store.cache_clear()
+        self._collection = None
 
     # ===== 内部 =====
     def _parse_results(
