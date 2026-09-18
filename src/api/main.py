@@ -94,7 +94,22 @@ async def query(req: QueryRequest):
                 latency_ms=(time.time() - start) * 1000,
             )
 
-        # 2. 构造 context
+        # 2. 短路判断：top1 score 太低直接拒答
+        from ..prompts.templates import REJECT_MESSAGE, REJECT_SCORE_THRESHOLD
+
+        if results[0].score < REJECT_SCORE_THRESHOLD:
+            preview_chunks, _ = build_context(results, top_n=min(3, len(results)))
+            preview_text = "\n\n".join(preview_chunks) if preview_chunks else "（无）"
+            return QueryResponse(
+                answer=REJECT_MESSAGE.format(context=preview_text),
+                retrieved_docs=_retrieve_to_response(results, min(3, len(results)))[0],
+                citations=[],
+                trace_id=trace_id,
+                usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+                latency_ms=(time.time() - start) * 1000,
+            )
+
+        # 3. 构造 context
         context_chunks, _ = build_context(results, top_n=req.top_n)
 
         # 3. 生成

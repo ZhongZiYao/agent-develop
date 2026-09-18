@@ -2,8 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Send, Loader2, BookOpen, Sparkles } from "lucide-react";
-import ReactMarkdown from "react-markdown";
 import { query, streamQuery, RetrievedDoc } from "@/lib/api";
+import { Markdown } from "./Markdown";
 
 interface Message {
   id: string;
@@ -246,7 +246,15 @@ function MessageBubble({ message }: { message: Message }) {
         >
           <div className={`prose prose-sm max-w-none ${message.streaming ? "streaming-cursor" : ""}`}>
             {message.content ? (
-              <ReactMarkdown>{message.content}</ReactMarkdown>
+              <Markdown
+                text={message.content}
+                sources={message.retrieved_docs?.map((d) => ({
+                  id: d.id,
+                  title: d.title,
+                  source: d.source,
+                  score: d.score,
+                }))}
+              />
             ) : (
               message.streaming && (
                 <div className="flex gap-1">
@@ -270,7 +278,8 @@ function MessageBubble({ message }: { message: Message }) {
               {message.retrieved_docs.map((doc, i) => (
                 <div
                   key={doc.id}
-                  className="px-3 py-2 bg-gray-50 rounded-lg border border-gray-100"
+                  id={`source-${i + 1}`}
+                  className="px-3 py-2 bg-gray-50 rounded-lg border border-gray-100 transition-all"
                 >
                   <div className="font-medium text-gray-700">
                     [{i + 1}] {doc.title}

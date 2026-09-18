@@ -19,6 +19,8 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from .config import settings
 from .llm import get_llm
 from .prompts.templates import (
+    REJECT_MESSAGE,
+    REJECT_SCORE_THRESHOLD,
     SYSTEM_PROMPT,
     build_user_prompt,
     format_context_chunk,
@@ -99,17 +101,35 @@ def run_rag(query: str, game: str = "") -> PipelineResult:
     端到端 RAG 流程
 
     Pipeline:
-      query → retrieve(top_k) → top_n → context → LLM → answer
+      query → retrieve(top_k) → top_n → 短路判断 → context → LLM → answer
+
+    短路逻辑（Phase 1.x 增强）：
+      当 top1 score < REJECT_SCORE_THRESHOLD 时，直接拒答，避免 LLM 编造
     """
     start = time.time()
 
     # 1. 召回
     results = retrieve(query, top_k=settings.top_k, game=game)
 
-    # 2. 构造 context
+    # 2. 短路判断：top1 score 太低则拒答
+    if not results or results[0].score < REJECT_SCORE_THRESHOLD:
+        # 用 top3 拼一个"仅供参考"的 context
+        preview_chunks, _ = build_context(results, top_n=min(3, len(results)))
+        preview_text = "\n\n".join(preview_chunks) if preview_chunks else "（无）"
+        reject_answer = REJECT_MESSAGE.format(context=preview_text)
+
+        latency_ms = (time.time() - start) * 1000
+        return PipelineResult(
+            answer=reject_answer,
+            retrieved_docs=results,
+            usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+            latency_ms=latency_ms,
+        )
+
+    # 3. 构造 context
     context_chunks, raw_chunks = build_context(results, top_n=settings.top_n)
 
-    # 3. 生成
+    # 4. 生成
     answer, usage = generate(query, context_chunks, game)
 
     latency_ms = (time.time() - start) * 1000
