@@ -1,0 +1,48 @@
+version: "3.9"
+
+services:
+  # ===== 后端 API =====
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    container_name: gameguide-api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./.env:/app/.env
+    environment:
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - ollama
+    restart: unless-stopped
+
+  # ===== 前端 Web =====
+  web:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.web
+    container_name: gameguide-web
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_BASE=http://localhost:8000
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  # ===== Ollama（可选） =====
+  ollama:
+    image: ollama/ollama:latest
+    container_name: gameguide-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+
+volumes:
+  ollama_data:

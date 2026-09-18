@@ -26,7 +26,7 @@
 | BM25 | rank_bm25 |
 | 框架 | LangChain + LangGraph |
 | 后端 | FastAPI + SSE |
-| 前端 | Streamlit |
+| 前端 | Next.js 14 (App Router) + TypeScript + Tailwind |
 | 评测 | RAGAS |
 | 追踪 | LangSmith |
 
@@ -83,23 +83,25 @@ gameguide-ai/
 ## 常用命令
 
 ```bash
-# 安装依赖
+# 后端
 pip install -r requirements.txt
-
-# 启动 API
 uvicorn src.api.main:app --reload --port 8000
-
-# 启动 Streamlit
-streamlit run src/ui/app.py
-
-# 跑单测
-pytest tests/ -v
-
-# 跑 RAGAS 评测
-python eval/ragas_eval.py --pipeline advanced
-
-# 重建索引
 python scripts/rebuild_index.py
+python scripts/cli_query.py "妖刀姬怎么连招？"
+python scripts/cli_query.py "E-4048 错误码" --stream
+
+# 前端
+cd web && npm install && npm run dev   # http://localhost:3000
+cd web && npm run build && npm start   # 生产模式
+
+# Docker
+docker-compose up -d                    # 一键启动全部
+docker exec -it gameguide-ollama ollama pull bge-m3
+docker exec -it gameguide-api python scripts/rebuild_index.py
+
+# 测试
+pytest tests/unit/ -v
+INTEGRATION_TESTS=1 pytest tests/integration/ -v
 ```
 
 ## 环境变量
@@ -132,7 +134,7 @@ CHROMA_PERSIST_DIR=./data/chroma
 
 参见 TaskList（项目级 TaskCreate 任务列表）：
 1. Phase 0：编写 PRD + 架构设计 + 准备数据 ✅
-2. Phase 1：实现 Naive RAG MVP（进行中）
+2. Phase 1：实现 Naive RAG MVP（进行中 ✅）
 3. Phase 2：Advanced RAG + 评测
 4. Phase 3：Modular 化重构
 5. Phase 4：Agentic RAG + 多 Agent
