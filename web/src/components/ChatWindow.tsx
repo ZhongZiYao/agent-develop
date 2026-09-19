@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Send, Loader2, BookOpen, Sparkles } from "lucide-react";
+import { Send, Loader2, BookOpen, Sparkles, X } from "lucide-react";
 import {
   createSession,
   getSession,
