@@ -29,6 +29,10 @@ ENV/
 data/chroma/
 data/bm25/
 data/processed/
+data/gameguide.db
+data/*.db
+data/*.sqlite
+data/*.sqlite3
 *.bin
 *.safetensors
 *.pkl
