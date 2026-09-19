@@ -27,6 +27,11 @@ anthropic>=0.30.0
 # Embedding（Ollama 本地）
 httpx>=0.27.0  # Ollama 也用 httpx 调 API
 
+# Reranker（Cross-Encoder）
+transformers>=4.35.0
+torch>=2.0.0
+sentencepiece>=0.1.99  # BGE reranker tokenizer
+
 # 向量库
 chromadb>=0.5.0
 

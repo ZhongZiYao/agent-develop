@@ -56,16 +56,25 @@ class Settings(BaseSettings):
     chunk_overlap: int = Field(default=50, ge=0, le=500)
 
     # ===== Retriever =====
-    top_k: int = Field(default=10, ge=1, le=100, description="召回数量")
+    top_k: int = Field(default=50, ge=1, le=200, description="混合检索召回数量（增加到50以支持重排）")
     top_n: int = Field(default=5, ge=1, le=20, description="最终送 LLM 的数量")
 
-    # ===== Reranker（Phase 2） =====
-    rerank_enabled: bool = Field(default=False)
-    rerank_model: str = Field(default="BAAI/bge-reranker-large")
+    # ===== Hybrid Retrieval（Phase 2 增强）=====
+    hybrid_search_enabled: bool = Field(default=False, description="启用混合检索（向量+BM25）")
+    vector_weight: float = Field(default=0.7, ge=0.0, le=1.0, description="向量检索权重")
+    bm25_weight: float = Field(default=0.3, ge=0.0, le=1.0, description="BM25 检索权重")
+    rrf_k: int = Field(default=60, description="RRF 融合常数")
 
-    # ===== Query 处理（Phase 2） =====
-    query_rewrite_enabled: bool = Field(default=False)
-    hyde_enabled: bool = Field(default=False)
+    # ===== Reranker（Phase 2 增强）=====
+    rerank_enabled: bool = Field(default=False, description="启用重排模型")
+    rerank_model: str = Field(default="BAAI/bge-reranker-v2-m3", description="重排模型名称")
+    rerank_top_n: int = Field(default=10, ge=1, le=50, description="重排后保留的数量")
+    rerank_device: str = Field(default="cpu", description="重排模型运行设备 (cpu/cuda)")
+
+    # ===== Query Processing（Phase 2 增强）=====
+    query_rewrite_enabled: bool = Field(default=False, description="启用查询改写")
+    query_expansion_enabled: bool = Field(default=False, description="启用查询扩展")
+    hyde_enabled: bool = Field(default=False, description="启用 HyDE（假设性文档嵌入）")
 
     # ===== 服务 =====
     api_host: str = Field(default="0.0.0.0")
