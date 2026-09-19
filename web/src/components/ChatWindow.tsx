@@ -45,11 +45,19 @@ export function ChatWindow({ game, useStream, topK, topN, sessionId, onSessionCr
   const [loading, setLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const prevSessionIdRef = useRef<string | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
-  // session 切换时加载历史
+  // session 切换时加载历史并取消正在进行的请求
   useEffect(() => {
     if (prevSessionIdRef.current === sessionId) return;
     prevSessionIdRef.current = sessionId;
+
+    // 取消旧会话的流式请求
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setLoading(false);
 
     if (!sessionId) {
       setMessages([]);

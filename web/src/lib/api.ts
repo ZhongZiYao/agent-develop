@@ -96,6 +96,7 @@ export async function* streamQuery(params: {
   top_k?: number;
   top_n?: number;
   session_id?: string;
+  signal?: AbortSignal;
 }): AsyncGenerator<{
   event: string;
   data: Record<string, unknown>;
@@ -110,6 +111,7 @@ export async function* streamQuery(params: {
       top_n: params.top_n ?? 5,
       session_id: params.session_id || null,
     }),
+    signal: params.signal,
   });
 
   if (!res.ok || !res.body) {

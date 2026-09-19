@@ -31,6 +31,8 @@ data/bm25/
 data/processed/
 data/gameguide.db
 data/*.db
+data/*.db-shm
+data/*.db-wal
 data/*.sqlite
 data/*.sqlite3
 *.bin
