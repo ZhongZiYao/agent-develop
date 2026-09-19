@@ -43,11 +43,13 @@ export function ChatWindow({ game, useStream, topK, topN, sessionId, onSessionCr
   const scrollRef = useRef<HTMLDivElement>(null);
   const [input, setInput] = useState("");
 
-  // 多会话状态管理：Map<sessionId, {messages, loading, abortController}>
+  // 多会话状态管理：Map<sessionId, {messages, loading, abortController, loaded}>
+  // loaded 标志表示是否已经从服务器加载过历史（避免重复加载）
   const sessionsRef = useRef<Map<string, {
     messages: Message[];
     loading: boolean;
     abortController: AbortController | null;
+    loaded: boolean;  // 是否已从服务器加载历史
   }>>(new Map());
 
   // 强制重新渲染
@@ -55,13 +57,14 @@ export function ChatWindow({ game, useStream, topK, topN, sessionId, onSessionCr
 
   // 获取当前会话的状态
   const getCurrentSession = () => {
-    if (!sessionId) return { messages: [], loading: false, abortController: null };
+    if (!sessionId) return { messages: [], loading: false, abortController: null, loaded: true };
 
     if (!sessionsRef.current.has(sessionId)) {
       sessionsRef.current.set(sessionId, {
         messages: [],
         loading: false,
         abortController: null,
+        loaded: false,
       });
     }
     return sessionsRef.current.get(sessionId)!;
@@ -71,40 +74,51 @@ export function ChatWindow({ game, useStream, topK, topN, sessionId, onSessionCr
   const messages = currentSession.messages;
   const loading = currentSession.loading;
 
-  // session 切换时只加载历史，不中止后台请求
+  // session 切换时加载历史（首次访问时才加载）
   useEffect(() => {
     if (!sessionId) return;
 
-    // 如果已经在内存中，直接显示
-    if (sessionsRef.current.has(sessionId)) {
-      forceUpdate({});
+    const current = sessionsRef.current.get(sessionId);
+
+    // 如果已经加载过历史，不重复加载
+    if (current?.loaded) {
       return;
+    }
+
+    // 标记为正在加载（避免重复请求）
+    if (current) {
+      current.loaded = true;
     }
 
     // 从服务器加载历史
     getSession(sessionId)
       .then((d) => {
-        const loaded: Message[] = (d.messages || []).map((m: SessionMessage) => ({
+        const sessionState = sessionsRef.current.get(sessionId) || {
+          messages: [],
+          loading: false,
+          abortController: null,
+          loaded: true,
+        };
+        sessionState.messages = (d.messages || []).map((m: SessionMessage) => ({
           id: m.id,
           role: m.role,
           content: m.content,
           thinking: m.thinking || undefined,
           retrieved_docs: m.retrieved_docs || undefined,
         }));
-
-        sessionsRef.current.set(sessionId, {
-          messages: loaded,
-          loading: false,
-          abortController: null,
-        });
+        sessionState.loaded = true;
+        sessionsRef.current.set(sessionId, sessionState);
         forceUpdate({});
       })
       .catch(() => {
-        sessionsRef.current.set(sessionId, {
+        const sessionState = sessionsRef.current.get(sessionId) || {
           messages: [],
           loading: false,
           abortController: null,
-        });
+          loaded: true,
+        };
+        sessionState.loaded = true;
+        sessionsRef.current.set(sessionId, sessionState);
         forceUpdate({});
       });
   }, [sessionId]);
@@ -127,12 +141,13 @@ export function ChatWindow({ game, useStream, topK, topN, sessionId, onSessionCr
         onSessionCreated?.(created.id);
       }
 
-      // 确保会话存在
+      // 确保会话存在（新建会话时设置 loaded=true，因为消息已在内存）
       if (!sessionsRef.current.has(activeSessionId)) {
         sessionsRef.current.set(activeSessionId, {
           messages: [],
           loading: false,
           abortController: null,
+          loaded: true,  // 新会话无需再加载历史
         });
       }
 
