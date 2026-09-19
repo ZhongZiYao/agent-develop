@@ -80,6 +80,9 @@ class Settings(BaseSettings):
     # ===== 调试 =====
     debug: bool = Field(default=False)
 
+    # ===== LangGraph Feature Flag =====
+    use_langgraph: bool = Field(default=False, description="是否启用 LangGraph 端点")
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

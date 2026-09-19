@@ -1,8 +1,10 @@
 """FastAPI 应用入口
 
 接口：
-- POST /api/v1/query      同步问答
-- POST /api/v1/stream     SSE 流式问答
+- POST /api/v1/query      同步问答（原实现）
+- POST /api/v1/stream     SSE 流式问答（原实现）
+- POST /api/v1/chat-graph      同步问答（LangGraph 版本，需 USE_LANGGRAPH=true）
+- POST /api/v1/chat-graph/stream  SSE 流式问答（LangGraph 版本，需 USE_LANGGRAPH=true）
 - POST /api/v1/index      触发索引
 - GET  /api/v1/index/{id} 查询索引状态
 - GET  /api/v1/health     健康检查
@@ -506,3 +508,11 @@ async def root():
 
 # 注册 session 路由
 app.include_router(sessions_router, prefix="/api/v1")
+
+# 注册 LangGraph 路由（Feature Flag 控制）
+if settings.use_langgraph:
+    from .graph_routes import router as graph_router
+    app.include_router(graph_router, prefix="/api/v1")
+    logger.info("LangGraph routes enabled")
+else:
+    logger.info("LangGraph routes disabled (USE_LANGGRAPH=false)")
