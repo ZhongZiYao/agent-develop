@@ -19,8 +19,8 @@
 
 | 层级 | 选型 |
 |------|------|
-| LLM | 通义千问 Qwen-Long / Claude 3.5 |
-| Embedding | BGE-M3（智源）|
+| LLM | Ollama 本地 qwen3:8b（reasoning=True，num_ctx=8192）|
+| Embedding | Ollama 本地 bge-m3（1024 维）|
 | Reranker | bge-reranker-large |
 | Vector Store | Chroma（本地）|
 | BM25 | rank_bm25 |
@@ -44,10 +44,10 @@ gameguide-ai/
 │   ├── retrievers/      # 召回（向量/BM25/Hybrid）
 │   ├── rerankers/       # 重排
 │   ├── prompts/         # Prompt 模板
-│   ├── agents/          # LangGraph Agent
+│   ├── agents/          # LangGraph Agent（Phase 4）
 │   ├── api/             # FastAPI
-│   └── ui/              # Streamlit
-├── tests/               # 单测 + 集成测试
+│   └── storage/         # SQLite Session / Memory
+├── web/                 # Next.js 14 前端
 ├── eval/                # RAGAS 评测脚本
 ├── notebooks/           # 实验性 Jupyter
 ├── configs/             # YAML 配置
@@ -108,10 +108,15 @@ INTEGRATION_TESTS=1 pytest tests/integration/ -v
 
 ```bash
 # .env（不要 commit）
-QWEN_API_KEY=xxx
-ANTHROPIC_API_KEY=xxx
-LANGSMITH_API_KEY=xxx
-LANGSMITH_TRACING=true
+LLM_PROVIDER=ollama
+LLM_BASE_URL=http://localhost:11434
+LLM_MODEL=qwen3:8b
+LLM_CONTEXT_WINDOW=8192
+LLM_REASONING=true
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_EMBED_MODEL=bge-m3
+LANGSMITH_API_KEY=
+LANGSMITH_TRACING=false
 LANGSMITH_PROJECT=gameguide-ai
 CHROMA_PERSIST_DIR=./data/chroma
 ```
@@ -124,11 +129,12 @@ CHROMA_PERSIST_DIR=./data/chroma
 
 ## 注意事项
 
-1. **不要默认用 OpenAI**——优先 Qwen-Long（中文强 + 便宜）
-2. **向量库先 Chroma**——本地零成本，Phase 5+ 再升级 Milvus
-3. **每写完一个模块**——立刻写单测
-4. **每个 Phase 结束**——跑通 + 截图 + 写博客
-5. **不要写 .env**——用 `.env.example` 做模板
+1. **默认生成模型用本地 Ollama qwen3:8b**；`bge-m3` 只用于 Embedding
+2. **本地地址与 Docker 地址不同**：本地用 `localhost`，容器用 `host.docker.internal`
+3. **向量库先 Chroma**——本地零成本，Phase 5+ 再升级 Milvus
+4. **每写完一个模块**——立刻写单测
+5. **每个 Phase 结束**——跑通 + 截图 + 写博客
+6. **不要写 .env**——用 `.env.example` 做模板
 
 ## 当前任务清单
 

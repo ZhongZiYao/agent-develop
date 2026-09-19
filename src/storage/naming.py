@@ -10,7 +10,8 @@ from __future__ import annotations
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from ..llm import get_llm
+from ..config import settings
+from ..llm import get_llm, message_text
 from ..prompts.thinking_parser import parse_thinking
 
 
@@ -44,15 +45,18 @@ async def generate_session_title(query: str, fallback: str | None = None) -> str
     try:
         llm = get_llm()
         # 限制 max_tokens 让 LLM 简短输出
+        invoke_config = {"temperature": 0.3}
+        if settings.llm_provider == "ollama":
+            invoke_config["reasoning"] = False
         response = await llm.ainvoke(
             [
                 SystemMessage(content=NAMING_SYSTEM),
                 HumanMessage(content=NAMING_USER_TEMPLATE.format(query=query)),
             ],
-            temperature=0.3,
+            **invoke_config,
         )
 
-        raw_title = str(response.content).strip()
+        raw_title = message_text(response).strip()
         clean_title, _thinking = parse_thinking(raw_title)
         title = (clean_title or raw_title).strip()
         # 去掉可能的引号和末尾标点。

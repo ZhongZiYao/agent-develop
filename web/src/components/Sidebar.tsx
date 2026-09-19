@@ -114,9 +114,9 @@ export function Sidebar({
         />
         <StatusCard
           icon={<Cpu className="w-3.5 h-3.5" />}
-          label="LLM API"
+          label="LLM"
           status={health?.components.llm_api}
-          detail="MiniMax"
+          detail={health?.components.llm_api || "未配置"}
         />
         <StatusCard
           icon={<Activity className="w-3.5 h-3.5" />}
@@ -193,7 +193,11 @@ function StatusCard({
   status?: string;
   detail: string;
 }) {
-  const isOk = status === "ok" || status === "configured";
+  const isOk =
+    status === "ok" ||
+    status === "configured" ||
+    status?.startsWith("ollama:") ||
+    status?.endsWith(":configured");
   return (
     <div className="px-2.5 py-1.5 mb-1 bg-white border border-gray-100 rounded-md text-xs">
       <div className="flex items-center justify-between">

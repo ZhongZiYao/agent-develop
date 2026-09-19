@@ -26,7 +26,7 @@ from loguru import logger
 from sse_starlette.sse import EventSourceResponse
 
 from ..config import settings
-from ..llm import get_streaming_llm
+from ..llm import get_streaming_llm, message_text, reasoning_text
 from ..pipeline import build_context, retrieve
 from ..prompts.templates import SYSTEM_PROMPT, build_user_prompt
 from ..schemas import Chunk
@@ -198,8 +198,9 @@ async def query(req: QueryRequest):
         response = llm.invoke(messages)
 
         # 剥离 <think>...</think> 块
-        raw_content = response.content
-        clean_answer, thinking_content = parse_thinking(raw_content)
+        raw_content = message_text(response)
+        clean_answer, tagged_thinking = parse_thinking(raw_content)
+        thinking_content = reasoning_text(response) or tagged_thinking
 
         usage = {}
         if hasattr(response, "response_metadata") and response.response_metadata:
@@ -321,14 +322,23 @@ async def stream(req: QueryRequest):
             full_thinking = ""
 
             async for chunk in llm.astream(messages):
-                if chunk.content:
-                    # 用状态机分流 thinking / answer
-                    answer_delta, thinking_delta = parser.feed(chunk.content)
-                    if thinking_delta:
-                        full_thinking += thinking_delta
+                structured_thinking = reasoning_text(chunk)
+                if structured_thinking:
+                    full_thinking += structured_thinking
+                    yield {
+                        "event": "thinking",
+                        "data": json.dumps({"delta": structured_thinking}, ensure_ascii=False),
+                    }
+
+                content_delta = message_text(chunk)
+                if content_delta:
+                    # 非 Ollama 模型可能仍将 reasoning 包在 <think> 中，保留 parser 兜底。
+                    answer_delta, tagged_thinking = parser.feed(content_delta)
+                    if tagged_thinking:
+                        full_thinking += tagged_thinking
                         yield {
                             "event": "thinking",
-                            "data": json.dumps({"delta": thinking_delta}, ensure_ascii=False),
+                            "data": json.dumps({"delta": tagged_thinking}, ensure_ascii=False),
                         }
                     if answer_delta:
                         full_answer += answer_delta
@@ -336,7 +346,7 @@ async def stream(req: QueryRequest):
                             "event": "generation",
                             "data": json.dumps({"delta": answer_delta}, ensure_ascii=False),
                         }
-                    await asyncio.sleep(0)
+                await asyncio.sleep(0)
 
             # 流结束：兜底刷出残留 thinking
             flush_thinking = parser.flush()
@@ -458,9 +468,12 @@ async def health():
 
     try:
         from ..llm import get_llm
-        # 不真调，只检查 key 是否配置
-        if settings.llm_api_key:
-            components["llm_api"] = "configured"
+
+        get_llm()
+        if settings.llm_provider == "ollama":
+            components["llm_api"] = f"ollama:{settings.llm_model}"
+        elif settings.llm_api_key:
+            components["llm_api"] = f"{settings.llm_provider}:configured"
         else:
             components["llm_api"] = "missing_key"
     except Exception:

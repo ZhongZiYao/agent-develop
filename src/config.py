@@ -24,14 +24,17 @@ class Settings(BaseSettings):
     )
 
     # ===== LLM =====
-    # MiniMax（与 OpenAI 兼容 API）
-    llm_provider: str = Field(default="minimax", description="LLM provider: minimax/openai/anthropic")
-    llm_api_key: str = Field(default="", description="LLM API key")
-    llm_base_url: str = Field(default="https://api.minimaxi.chat/v1", description="API base URL")
-    llm_model: str = Field(default="MiniMax-Text-01", description="模型名")
+    # ollama: 本地 ChatOllama；minimax/openai: OpenAI 兼容 API
+    llm_provider: str = Field(default="ollama", description="LLM provider: ollama/minimax/openai")
+    llm_api_key: str = Field(default="", description="远程 LLM API key；Ollama 不需要")
+    llm_base_url: str = Field(default="http://localhost:11434", description="LLM API base URL")
+    llm_model: str = Field(default="qwen3:8b", description="模型名")
     llm_temperature: float = Field(default=0.1, ge=0.0, le=2.0)
     llm_max_tokens: int = Field(default=2048, ge=1, le=8192)
-    llm_timeout: int = Field(default=60, description="API 超时秒数")
+    llm_timeout: int = Field(default=180, description="API 超时秒数")
+    llm_context_window: int = Field(default=8192, ge=1024, description="Ollama 上下文窗口")
+    llm_reasoning: bool = Field(default=True, description="是否启用本地模型 reasoning")
+    llm_keep_alive: str = Field(default="15m", description="Ollama 模型驻留时间")
 
     # ===== Embedding（Ollama 本地） =====
     embedding_provider: str = Field(default="ollama", description="embedding provider: ollama/openai/bge")

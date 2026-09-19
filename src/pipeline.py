@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from .config import settings
-from .llm import get_llm
+from .llm import get_llm, message_text
 from .prompts.templates import (
     REJECT_MESSAGE,
     REJECT_SCORE_THRESHOLD,
@@ -148,7 +148,7 @@ def generate(
             "total_tokens": token_usage.get("total_tokens", 0),
         }
 
-    return response.content, usage
+    return message_text(response), usage
 
 
 async def run_rag_async(query: str, game: str = "", session_id: str | None = None) -> PipelineResult:

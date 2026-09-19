@@ -34,6 +34,9 @@ services:
         --reload
         --reload-dir /app/src
     environment:
+      - LLM_PROVIDER=ollama
+      - LLM_BASE_URL=http://host.docker.internal:11434
+      - LLM_MODEL=qwen3:8b
       - OLLAMA_BASE_URL=http://host.docker.internal:11434
       - WATCHFILES_FORCE_POLLING=true
     extra_hosts:

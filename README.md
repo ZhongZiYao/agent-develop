@@ -18,8 +18,8 @@
 
 | 组件 | 选型 |
 |------|------|
-| **LLM** | MiniMax（OpenAI 兼容 API） |
-| **Embedding** | Ollama 本地 bge-m3（中文 SOTA） |
+| **LLM** | Ollama 本地 qwen3:8b（Thinking + Tool Use） |
+| **Embedding** | Ollama 本地 bge-m3（中文） |
 | **Vector Store** | Chroma（本地持久化） |
 | **框架** | LangChain + LangGraph |
 | **后端** | FastAPI + SSE |
@@ -73,9 +73,10 @@ gameguide-ai/
 # 安装 Ollama（Windows/Mac/Linux 各自下载）
 # https://ollama.com/download
 
-# 拉取 embedding 模型
-ollama serve                # 启动服务
-ollama pull bge-m3          # 拉取 bge-m3（中文 SOTA，1024 维）
+# 拉取本地模型
+ollama serve                # Windows 通常由桌面程序自动启动
+ollama pull bge-m3          # Embedding：1024 维
+ollama pull qwen3:8b        # 生成模型：Thinking + Tool Use
 ```
 
 #### 2. 启动后端
@@ -86,7 +87,7 @@ pip install -r requirements.txt
 
 # 配置环境变量
 cp .env.example .env
-# 编辑 .env，填入 LLM_API_KEY
+# 默认使用本地 Ollama qwen3:8b，无需 API Key
 
 # 构建索引
 python scripts/rebuild_index.py
@@ -117,20 +118,23 @@ python scripts/cli_query.py "妖刀姬 S13 怎么连招？"
 python scripts/cli_query.py "E-4048 错误码" --stream
 ```
 
-### 方式 2：Docker Compose（一键启动）
+### 方式 2：Docker Compose（一键启动 API + Web）
+
+Ollama 运行在 Windows 宿主机，容器通过 `host.docker.internal` 访问。
 
 ```bash
-# 启动所有服务（含 Ollama）
-docker-compose up -d
+# 先确认宿主机模型已准备
+ollama pull bge-m3
+ollama pull qwen3:8b
 
-# 拉取 bge-m3
-docker exec -it gameguide-ollama ollama pull bge-m3
+# 构建并启动 API + Web
+docker compose up -d --build
 
-# 重建索引（首次）
+# 首次构建索引
 docker exec -it gameguide-api python scripts/rebuild_index.py
 
 # 查看日志
-docker-compose logs -f
+docker compose logs -f
 ```
 
 打开 http://localhost:3000
@@ -170,12 +174,14 @@ docker-compose logs -f
 完整配置见 `.env.example`。关键项：
 
 ```bash
-# LLM
-LLM_API_KEY=sk-xxx                    # MiniMax key
-LLM_BASE_URL=https://api.minimaxi.chat/v1
-LLM_MODEL=MiniMax-Text-01
+# Ollama 本地生成模型
+LLM_PROVIDER=ollama
+LLM_BASE_URL=http://localhost:11434
+LLM_MODEL=qwen3:8b
+LLM_CONTEXT_WINDOW=8192
+LLM_REASONING=true
 
-# Embedding（Ollama）
+# Ollama 本地 Embedding
 OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_EMBED_MODEL=bge-m3
 
