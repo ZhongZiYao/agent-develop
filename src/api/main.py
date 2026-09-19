@@ -6,6 +6,7 @@
 - POST /api/v1/index      触发索引
 - GET  /api/v1/index/{id} 查询索引状态
 - GET  /api/v1/health     健康检查
+- /api/v1/sessions/*     会话管理（Phase 1.5）
 """
 
 from __future__ import annotations
@@ -14,12 +15,14 @@ import asyncio
 import json
 import time
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from langchain_core.messages import HumanMessage, SystemMessage
+from loguru import logger
 from sse_starlette.sse import EventSourceResponse
 
 from ..config import settings
@@ -28,6 +31,7 @@ from ..pipeline import build_context, retrieve
 from ..prompts.templates import SYSTEM_PROMPT, build_user_prompt
 from ..schemas import Chunk
 from ..splitters.recursive_splitter import split_documents
+from ..storage.database import init_db
 from ..vectorstore.chroma_store import get_vector_store_instance
 from ..loaders.markdown_loader import load_markdown_dir
 from .schemas import (
@@ -38,12 +42,21 @@ from .schemas import (
     QueryResponse,
     RetrievedDoc,
 )
+from .sessions import router as sessions_router
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """FastAPI 生命周期：启动时初始化数据库"""
+    await init_db()
+    yield
 
 
 app = FastAPI(
     title="GameGuide AI",
     description="游戏攻略问答 RAG 系统 API",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -77,11 +90,15 @@ def _retrieve_to_response(results, top_n: int) -> tuple[list[RetrievedDoc], list
 
 @app.post("/api/v1/query", response_model=QueryResponse)
 async def query(req: QueryRequest):
-    """同步问答"""
+    """同步问答（支持 session 历史）"""
     start = time.time()
     trace_id = f"trace-{uuid.uuid4().hex[:12]}"
 
     try:
+        # 加载历史（如果提供了 session_id）
+        from ..pipeline import load_history
+        history = await load_history(req.session_id) if req.session_id else []
+
         # 1. 检索
         results = retrieve(req.query, top_k=req.top_k, game=req.game)
 
@@ -112,14 +129,19 @@ async def query(req: QueryRequest):
         # 3. 构造 context
         context_chunks, _ = build_context(results, top_n=req.top_n)
 
-        # 3. 生成
+        # 3. 生成（带 history）
         from ..llm import get_llm
+        from ..pipeline import format_history
         from ..prompts.thinking_parser import parse_thinking
 
         llm = get_llm()
+        user_prompt = build_user_prompt(req.query, context_chunks, req.game or "")
+        if history:
+            user_prompt = format_history(history) + user_prompt
+
         messages = [
             SystemMessage(content=SYSTEM_PROMPT),
-            HumanMessage(content=build_user_prompt(req.query, context_chunks, req.game or "")),
+            HumanMessage(content=user_prompt),
         ]
         response = llm.invoke(messages)
 
@@ -138,6 +160,47 @@ async def query(req: QueryRequest):
 
         # 4. 构造响应
         retrieved_docs, _ = _retrieve_to_response(results, req.top_n)
+
+        # 5. 自动持久化到 session（如果提供了 session_id）
+        if req.session_id:
+            try:
+                from ..storage.database import AsyncSessionLocal
+                from ..storage.session_store import SessionStore
+
+                async with AsyncSessionLocal() as db:
+                    store = SessionStore(db)
+                    # 存 user 消息
+                    await store.append_message(req.session_id, "user", req.query)
+                    # 存 assistant 消息（含 thinking + retrieved_docs）
+                    await store.append_message(
+                        req.session_id,
+                        "assistant",
+                        clean_answer or raw_content,
+                        thinking=thinking_content,
+                        retrieved_docs=[d.model_dump() for d in retrieved_docs],
+                    )
+            except Exception as e:
+                # 持久化失败不影响主流程
+                logger.warning(f"Failed to persist messages: {e}")
+
+            # 6. 触发智能命名（异步后台任务，首条 query 时）
+            try:
+                import asyncio
+                from ..storage.naming import generate_session_title, rename_session_async
+                from ..storage.database import AsyncSessionLocal
+                from ..storage.session_store import SessionStore
+
+                async def _maybe_rename():
+                    async with AsyncSessionLocal() as db:
+                        store = SessionStore(db)
+                        session = await store.get_session(req.session_id, include_messages=False)
+                        if session and not session.get("title") or session.get("title") == "新对话":
+                            new_title = await generate_session_title(req.query)
+                            await rename_session_async(req.session_id, new_title)
+
+                asyncio.create_task(_maybe_rename())
+            except Exception as e:
+                logger.debug(f"Auto-naming skipped: {e}")
 
         return QueryResponse(
             answer=clean_answer or raw_content,  # 兜底：剥离失败就用原文
@@ -353,3 +416,7 @@ async def root():
         "version": "0.1.0",
         "docs": "/docs",
     }
+
+
+# 注册 session 路由
+app.include_router(sessions_router, prefix="/api/v1")

@@ -13,6 +13,7 @@ class QueryRequest(BaseModel):
     game: Optional[str] = Field(None, description="游戏过滤")
     top_k: int = Field(10, ge=1, le=100)
     top_n: int = Field(5, ge=1, le=20)
+    session_id: Optional[str] = Field(None, description="会话 ID（传入则注入历史）")
 
 
 class RetrievedDoc(BaseModel):
