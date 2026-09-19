@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Send, Loader2, BookOpen, Sparkles, X } from "lucide-react";
+import { Send, Loader2, BookOpen, Sparkles } from "lucide-react";
 import {
   createSession,
   getSession,
@@ -40,48 +40,30 @@ const EXAMPLE_QUERIES = [
 ];
 
 export function ChatWindow({ game, useStream, topK, topN, sessionId, onSessionCreated }: Props) {
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const prevSessionIdRef = useRef<string | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
-  // 多会话状态管理：Map<sessionId, {messages, loading, abortController}>
-  const sessionsRef = useRef<Map<string, {
-    messages: Message[];
-    loading: boolean;
-    abortController: AbortController | null;
-  }>>(new Map());
-
-  // 强制重新渲染
-  const [, forceUpdate] = useState({});
-
-  // 获取当前会话的状态
-  const getCurrentSession = () => {
-    if (!sessionId) return { messages: [], loading: false, abortController: null };
-
-    if (!sessionsRef.current.has(sessionId)) {
-      sessionsRef.current.set(sessionId, {
-        messages: [],
-        loading: false,
-        abortController: null,
-      });
-    }
-    return sessionsRef.current.get(sessionId)!;
-  };
-
-  const currentSession = getCurrentSession();
-  const messages = currentSession.messages;
-  const loading = currentSession.loading;
-
-  // session 切换时只加载历史，不中止后台请求
+  // session 切换时加载历史并取消正在进行的请求
   useEffect(() => {
-    if (!sessionId) return;
+    if (prevSessionIdRef.current === sessionId) return;
+    prevSessionIdRef.current = sessionId;
 
-    // 如果已经在内存中，直接显示
-    if (sessionsRef.current.has(sessionId)) {
-      forceUpdate({});
+    // 取消旧会话的流式请求
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setLoading(false);
+
+    if (!sessionId) {
+      setMessages([]);
       return;
     }
 
-    // 从服务器加载历史
     getSession(sessionId)
       .then((d) => {
         const loaded: Message[] = (d.messages || []).map((m: SessionMessage) => ({
@@ -91,22 +73,9 @@ export function ChatWindow({ game, useStream, topK, topN, sessionId, onSessionCr
           thinking: m.thinking || undefined,
           retrieved_docs: m.retrieved_docs || undefined,
         }));
-
-        sessionsRef.current.set(sessionId, {
-          messages: loaded,
-          loading: false,
-          abortController: null,
-        });
-        forceUpdate({});
+        setMessages(loaded);
       })
-      .catch(() => {
-        sessionsRef.current.set(sessionId, {
-          messages: [],
-          loading: false,
-          abortController: null,
-        });
-        forceUpdate({});
-      });
+      .catch(() => setMessages([]));
   }, [sessionId]);
 
   useEffect(() => {
@@ -119,24 +88,15 @@ export function ChatWindow({ game, useStream, topK, topN, sessionId, onSessionCr
   async function handleSubmit(queryText: string) {
     if (!queryText.trim() || loading) return;
 
+    setLoading(true);
     let activeSessionId = sessionId;
     try {
       if (!activeSessionId) {
         const created = await createSession();
         activeSessionId = created.id;
+        prevSessionIdRef.current = created.id;
         onSessionCreated?.(created.id);
       }
-
-      // 确保会话存在
-      if (!sessionsRef.current.has(activeSessionId)) {
-        sessionsRef.current.set(activeSessionId, {
-          messages: [],
-          loading: false,
-          abortController: null,
-        });
-      }
-
-      const session = sessionsRef.current.get(activeSessionId)!;
 
       const userMsg: Message = {
         id: `u-${Date.now()}`,
@@ -152,10 +112,7 @@ export function ChatWindow({ game, useStream, topK, topN, sessionId, onSessionCr
         retrieved_docs: [],
       };
 
-      // 更新当前会话的 messages 和 loading
-      session.messages = [...session.messages, userMsg, assistantMsg];
-      session.loading = true;
-      forceUpdate({});
+      setMessages((prev) => [...prev, userMsg, assistantMsg]);
       setInput("");
 
       if (useStream) {
@@ -165,27 +122,17 @@ export function ChatWindow({ game, useStream, topK, topN, sessionId, onSessionCr
       }
       onSessionCreated?.(activeSessionId);
     } catch (err) {
-      if (!activeSessionId) return;
-      const session = sessionsRef.current.get(activeSessionId);
-      if (!session) return;
-
-      const latestAssistant = [...session.messages].reverse().find((m) => m.role === "assistant");
-      if (!latestAssistant) return;
-
-      session.messages = session.messages.map((m) =>
-        m.id === latestAssistant.id
-          ? { ...m, content: `❌ 出错了：${(err as Error).message}`, streaming: false }
-          : m
-      );
-      forceUpdate({});
+      setMessages((prev) => {
+        const latestAssistant = [...prev].reverse().find((m) => m.role === "assistant");
+        if (!latestAssistant) return prev;
+        return prev.map((m) =>
+          m.id === latestAssistant.id
+            ? { ...m, content: `❌ 出错了：${(err as Error).message}`, streaming: false }
+            : m
+        );
+      });
     } finally {
-      if (activeSessionId) {
-        const session = sessionsRef.current.get(activeSessionId);
-        if (session) {
-          session.loading = false;
-          forceUpdate({});
-        }
-      }
+      setLoading(false);
     }
   }
 
@@ -201,23 +148,20 @@ export function ChatWindow({ game, useStream, topK, topN, sessionId, onSessionCr
       top_n: topN,
       session_id: activeSessionId,
     });
-
-    const session = sessionsRef.current.get(activeSessionId);
-    if (!session) return;
-
-    session.messages = session.messages.map((m) =>
-      m.id === assistantId
-        ? {
-            ...m,
-            content: result.answer,
-            thinking: result.thinking || undefined,
-            retrieved_docs: result.retrieved_docs,
-            latency_ms: result.latency_ms,
-            streaming: false,
-          }
-        : m
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === assistantId
+          ? {
+              ...m,
+              content: result.answer,
+              thinking: result.thinking || undefined,
+              retrieved_docs: result.retrieved_docs,
+              latency_ms: result.latency_ms,
+              streaming: false,
+            }
+          : m
+      )
     );
-    forceUpdate({});
   }
 
   async function handleStream(
@@ -229,40 +173,31 @@ export function ChatWindow({ game, useStream, topK, topN, sessionId, onSessionCr
     let retrievedDocs: RetrievedDoc[] = [];
     let fullThinking = "";
 
-    const session = sessionsRef.current.get(activeSessionId);
-    if (!session) return;
-
-    // 为当前会话创建独立的 AbortController
-    const controller = new AbortController();
-    session.abortController = controller;
-
-    try {
-      for await (const event of streamQuery({
-        query: queryText,
-        game: game || undefined,
-        top_k: topK,
-        top_n: topN,
-        session_id: activeSessionId,
-        signal: controller.signal,
-      })) {
-        const currentSession = sessionsRef.current.get(activeSessionId);
-        if (!currentSession) break;
-
-        if (event.event === "thinking") {
-          fullThinking += (event.data.delta as string) || "";
-          currentSession.messages = currentSession.messages.map((m) =>
+    for await (const event of streamQuery({
+      query: queryText,
+      game: game || undefined,
+      top_k: topK,
+      top_n: topN,
+      session_id: activeSessionId,
+    })) {
+      if (event.event === "thinking") {
+        fullThinking += (event.data.delta as string) || "";
+        setMessages((prev) =>
+          prev.map((m) =>
             m.id === assistantId ? { ...m, thinking: fullThinking } : m
-          );
-          forceUpdate({});
-        } else if (event.event === "generation") {
-          fullAnswer += (event.data.delta as string) || "";
-          currentSession.messages = currentSession.messages.map((m) =>
+          )
+        );
+      } else if (event.event === "generation") {
+        fullAnswer += (event.data.delta as string) || "";
+        setMessages((prev) =>
+          prev.map((m) =>
             m.id === assistantId ? { ...m, content: fullAnswer } : m
-          );
-          forceUpdate({});
-        } else if (event.event === "done") {
-          retrievedDocs = (event.data.retrieved_docs as RetrievedDoc[]) || [];
-          currentSession.messages = currentSession.messages.map((m) =>
+          )
+        );
+      } else if (event.event === "done") {
+        retrievedDocs = (event.data.retrieved_docs as RetrievedDoc[]) || [];
+        setMessages((prev) =>
+          prev.map((m) =>
             m.id === assistantId
               ? {
                   ...m,
@@ -272,36 +207,16 @@ export function ChatWindow({ game, useStream, topK, topN, sessionId, onSessionCr
                   streaming: false,
                 }
               : m
-          );
-          forceUpdate({});
-        } else if (event.event === "error") {
-          currentSession.messages = currentSession.messages.map((m) =>
+          )
+        );
+      } else if (event.event === "error") {
+        setMessages((prev) =>
+          prev.map((m) =>
             m.id === assistantId
               ? { ...m, content: `❌ ${event.data.error}`, streaming: false }
               : m
-          );
-          forceUpdate({});
-        }
-      }
-    } catch (err: any) {
-      const currentSession = sessionsRef.current.get(activeSessionId);
-      if (!currentSession) return;
-
-      // 如果是 abort，显示已取消
-      if (err.name === "AbortError") {
-        currentSession.messages = currentSession.messages.map((m) =>
-          m.id === assistantId
-            ? { ...m, content: fullAnswer || "已取消", streaming: false }
-            : m
+          )
         );
-        forceUpdate({});
-      } else {
-        throw err; // 重新抛出其他错误
-      }
-    } finally {
-      const currentSession = sessionsRef.current.get(activeSessionId);
-      if (currentSession && currentSession.abortController === controller) {
-        currentSession.abortController = null;
       }
     }
   }
@@ -354,26 +269,6 @@ export function ChatWindow({ game, useStream, topK, topN, sessionId, onSessionCr
             placeholder="问点什么吧…比如「妖刀姬 S13 怎么连招？」"
             className="flex-1 px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:bg-gray-50"
           />
-          {loading && currentSession.abortController && (
-            <button
-              type="button"
-              onClick={() => {
-                if (sessionId) {
-                  const session = sessionsRef.current.get(sessionId);
-                  if (session?.abortController) {
-                    session.abortController.abort();
-                    session.abortController = null;
-                    session.loading = false;
-                    forceUpdate({});
-                  }
-                }
-              }}
-              className="px-4 py-3 bg-red-500 text-white rounded-xl hover:bg-red-600 flex items-center gap-2"
-              title="取消当前会话的请求"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          )}
           <button
             type="submit"
             disabled={loading || !input.trim()}

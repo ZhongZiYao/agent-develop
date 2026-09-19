@@ -39,6 +39,8 @@ services:
       - LLM_MODEL=qwen3:8b
       - OLLAMA_BASE_URL=http://host.docker.internal:11434
       - WATCHFILES_FORCE_POLLING=true
+      # HuggingFace 镜像加速（国内用户）
+      - HF_ENDPOINT=https://hf-mirror.com
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped

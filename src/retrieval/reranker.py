@@ -31,7 +31,9 @@ class Reranker:
     def __init__(self, model_name: str = "BAAI/bge-reranker-v2-m3", device: str = "cpu"):
         """
         Args:
-            model_name: HuggingFace 模型名称
+            model_name: HuggingFace 模型名称或本地路径
+                - HuggingFace: "BAAI/bge-reranker-v2-m3"
+                - 本地路径: "./models/bge-reranker-v2-m3"
             device: 运行设备 (cpu/cuda)
         """
         self.model_name = model_name
