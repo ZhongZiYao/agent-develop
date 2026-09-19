@@ -2,6 +2,31 @@
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
 
+export interface SessionListItem {
+  id: string;
+  title: string;
+  created_at: string | null;
+  updated_at: string | null;
+  message_count: number;
+}
+
+export interface SessionMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  thinking?: string | null;
+  retrieved_docs?: RetrievedDoc[] | null;
+  created_at: string | null;
+}
+
+export interface SessionDetail {
+  id: string;
+  title: string;
+  created_at: string | null;
+  updated_at: string | null;
+  messages: SessionMessage[];
+}
+
 export interface RetrievedDoc {
   id: string;
   title: string;
@@ -44,6 +69,7 @@ export async function query(params: {
   game?: string;
   top_k?: number;
   top_n?: number;
+  session_id?: string;
 }): Promise<QueryResponse> {
   const res = await fetch(`${API_BASE}/api/v1/query`, {
     method: "POST",
@@ -53,6 +79,7 @@ export async function query(params: {
       game: params.game || null,
       top_k: params.top_k ?? 10,
       top_n: params.top_n ?? 5,
+      session_id: params.session_id || null,
     }),
   });
   if (!res.ok) {
@@ -68,6 +95,7 @@ export async function* streamQuery(params: {
   game?: string;
   top_k?: number;
   top_n?: number;
+  session_id?: string;
 }): AsyncGenerator<{
   event: string;
   data: Record<string, unknown>;
@@ -80,6 +108,7 @@ export async function* streamQuery(params: {
       game: params.game || null,
       top_k: params.top_k ?? 10,
       top_n: params.top_n ?? 5,
+      session_id: params.session_id || null,
     }),
   });
 
@@ -145,4 +174,48 @@ export async function getIndexStatus(jobId: string): Promise<IndexResponse> {
 export async function checkHealth(): Promise<HealthResponse> {
   const res = await fetch(`${API_BASE}/api/v1/health`);
   return res.json();
+}
+
+// ===== Session API =====
+
+export async function listSessions(search?: string): Promise<SessionListItem[]> {
+  const url = search
+    ? `${API_BASE}/api/v1/sessions?search=${encodeURIComponent(search)}`
+    : `${API_BASE}/api/v1/sessions`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("Failed to list sessions");
+  return res.json();
+}
+
+export async function createSession(title?: string): Promise<SessionDetail> {
+  const res = await fetch(`${API_BASE}/api/v1/sessions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title: title || null }),
+  });
+  if (!res.ok) throw new Error("Failed to create session");
+  return res.json();
+}
+
+export async function getSession(sessionId: string): Promise<SessionDetail> {
+  const res = await fetch(`${API_BASE}/api/v1/sessions/${sessionId}`);
+  if (!res.ok) throw new Error("Failed to get session");
+  return res.json();
+}
+
+export async function renameSession(sessionId: string, title: string): Promise<SessionDetail> {
+  const res = await fetch(`${API_BASE}/api/v1/sessions/${sessionId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title }),
+  });
+  if (!res.ok) throw new Error("Failed to rename session");
+  return res.json();
+}
+
+export async function deleteSession(sessionId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/v1/sessions/${sessionId}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error("Failed to delete session");
 }

@@ -2,7 +2,14 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Send, Loader2, BookOpen, Sparkles } from "lucide-react";
-import { query, streamQuery, RetrievedDoc } from "@/lib/api";
+import {
+  createSession,
+  getSession,
+  query,
+  streamQuery,
+  RetrievedDoc,
+  SessionMessage,
+} from "@/lib/api";
 import { Markdown } from "./Markdown";
 import { ThinkingPanel } from "./ThinkingPanel";
 
@@ -21,6 +28,8 @@ interface Props {
   useStream: boolean;
   topK: number;
   topN: number;
+  sessionId: string | null;
+  onSessionCreated?: (sessionId: string) => void;
 }
 
 const EXAMPLE_QUERIES = [
@@ -30,11 +39,36 @@ const EXAMPLE_QUERIES = [
   "素问在副本里站什么位置？",
 ];
 
-export function ChatWindow({ game, useStream, topK, topN }: Props) {
+export function ChatWindow({ game, useStream, topK, topN, sessionId, onSessionCreated }: Props) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const prevSessionIdRef = useRef<string | null>(null);
+
+  // session 切换时加载历史
+  useEffect(() => {
+    if (prevSessionIdRef.current === sessionId) return;
+    prevSessionIdRef.current = sessionId;
+
+    if (!sessionId) {
+      setMessages([]);
+      return;
+    }
+
+    getSession(sessionId)
+      .then((d) => {
+        const loaded: Message[] = (d.messages || []).map((m: SessionMessage) => ({
+          id: m.id,
+          role: m.role,
+          content: m.content,
+          thinking: m.thinking || undefined,
+          retrieved_docs: m.retrieved_docs || undefined,
+        }));
+        setMessages(loaded);
+      })
+      .catch(() => setMessages([]));
+  }, [sessionId]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({
@@ -46,49 +80,65 @@ export function ChatWindow({ game, useStream, topK, topN }: Props) {
   async function handleSubmit(queryText: string) {
     if (!queryText.trim() || loading) return;
 
-    const userMsg: Message = {
-      id: `u-${Date.now()}`,
-      role: "user",
-      content: queryText,
-    };
-    const assistantId = `a-${Date.now()}`;
-    const assistantMsg: Message = {
-      id: assistantId,
-      role: "assistant",
-      content: "",
-      streaming: useStream,
-      retrieved_docs: [],
-    };
-
-    setMessages((prev) => [...prev, userMsg, assistantMsg]);
-    setInput("");
     setLoading(true);
-
+    let activeSessionId = sessionId;
     try {
-      if (useStream) {
-        await handleStream(queryText, assistantId);
-      } else {
-        await handleSync(queryText, assistantId);
+      if (!activeSessionId) {
+        const created = await createSession();
+        activeSessionId = created.id;
+        prevSessionIdRef.current = created.id;
+        onSessionCreated?.(created.id);
       }
+
+      const userMsg: Message = {
+        id: `u-${Date.now()}`,
+        role: "user",
+        content: queryText,
+      };
+      const assistantId = `a-${Date.now()}`;
+      const assistantMsg: Message = {
+        id: assistantId,
+        role: "assistant",
+        content: "",
+        streaming: useStream,
+        retrieved_docs: [],
+      };
+
+      setMessages((prev) => [...prev, userMsg, assistantMsg]);
+      setInput("");
+
+      if (useStream) {
+        await handleStream(queryText, assistantId, activeSessionId);
+      } else {
+        await handleSync(queryText, assistantId, activeSessionId);
+      }
+      onSessionCreated?.(activeSessionId);
     } catch (err) {
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === assistantId
+      setMessages((prev) => {
+        const latestAssistant = [...prev].reverse().find((m) => m.role === "assistant");
+        if (!latestAssistant) return prev;
+        return prev.map((m) =>
+          m.id === latestAssistant.id
             ? { ...m, content: `❌ 出错了：${(err as Error).message}`, streaming: false }
             : m
-        )
-      );
+        );
+      });
     } finally {
       setLoading(false);
     }
   }
 
-  async function handleSync(queryText: string, assistantId: string) {
+  async function handleSync(
+    queryText: string,
+    assistantId: string,
+    activeSessionId: string
+  ) {
     const result = await query({
       query: queryText,
       game: game || undefined,
       top_k: topK,
       top_n: topN,
+      session_id: activeSessionId,
     });
     setMessages((prev) =>
       prev.map((m) =>
@@ -96,6 +146,7 @@ export function ChatWindow({ game, useStream, topK, topN }: Props) {
           ? {
               ...m,
               content: result.answer,
+              thinking: result.thinking || undefined,
               retrieved_docs: result.retrieved_docs,
               latency_ms: result.latency_ms,
               streaming: false,
@@ -105,7 +156,11 @@ export function ChatWindow({ game, useStream, topK, topN }: Props) {
     );
   }
 
-  async function handleStream(queryText: string, assistantId: string) {
+  async function handleStream(
+    queryText: string,
+    assistantId: string,
+    activeSessionId: string
+  ) {
     let fullAnswer = "";
     let retrievedDocs: RetrievedDoc[] = [];
     let fullThinking = "";
@@ -115,6 +170,7 @@ export function ChatWindow({ game, useStream, topK, topN }: Props) {
       game: game || undefined,
       top_k: topK,
       top_n: topN,
+      session_id: activeSessionId,
     })) {
       if (event.event === "thinking") {
         fullThinking += (event.data.delta as string) || "";
