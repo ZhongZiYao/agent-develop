@@ -52,7 +52,7 @@ async def retrieve_node(state: RAGState) -> dict:
     # Phase 2: 混合检索（如果启用）
     if settings.hybrid_search_enabled:
         from ..retrieval.hybrid_retriever import HybridRetriever
-        from ..vector_store import get_vector_store_instance
+        from ..vectorstore.chroma_store import get_vector_store_instance
 
         vs = get_vector_store_instance()
         hybrid_retriever = HybridRetriever(vs, bm25_index=None)  # BM25 暂未实现
