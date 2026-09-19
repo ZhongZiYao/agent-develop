@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from .llm import get_llm
-from .prompts.templates import SYSTEM_PROMPT
+from ..llm import get_llm
+from ..prompts.thinking_parser import parse_thinking
 
 
 NAMING_SYSTEM = """你是 GameGuide AI 的会话命名助手。
@@ -52,18 +52,20 @@ async def generate_session_title(query: str, fallback: str | None = None) -> str
             temperature=0.3,
         )
 
-        title = response.content.strip()
-        # 去掉可能的引号
+        raw_title = str(response.content).strip()
+        clean_title, _thinking = parse_thinking(raw_title)
+        title = (clean_title or raw_title).strip()
+        # 去掉可能的引号和末尾标点。
         title = title.strip('"').strip("'").strip("「").strip("」").strip()
-        # 截断到 10 字以内
-        if len(title) > 15:
-            title = title[:15]
+        title = title.rstrip("。！？!?.，,").strip()
+        # 严格限制为 10 个字符。
+        if len(title) > 10:
+            title = title[:10]
 
-        return title or (fallback or query[:15])
+        return title or (fallback or query[:10])
 
     except Exception:
-        # 失败兜底
-        return fallback or query[:15]
+        return fallback or query[:10]
 
 
 async def rename_session_async(session_id: str, new_title: str) -> bool:

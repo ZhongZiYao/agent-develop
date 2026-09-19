@@ -157,8 +157,8 @@ class StreamThinkingParser:
         return answer_out, thinking_out
 
     def flush(self) -> str:
-        """流结束时调用，返回完整 thinking"""
-        return self.thinking_buf
+        """流结束时返回尚未发送的残留内容；当前实现逐段发送，因此无残留。"""
+        return ""
 
     def get_full_thinking(self) -> str:
         return self.thinking_buf.strip()

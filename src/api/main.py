@@ -88,6 +88,48 @@ def _retrieve_to_response(results, top_n: int) -> tuple[list[RetrievedDoc], list
     return docs, [r.chunk for r in results[:top_n]]
 
 
+async def _persist_turn(
+    session_id: str | None,
+    query_text: str,
+    answer: str,
+    thinking: str,
+    retrieved_docs: list[RetrievedDoc],
+    history_count: int,
+) -> None:
+    """持久化一轮对话；首轮在后台生成标题。失败不影响问答主流程。"""
+    if not session_id:
+        return
+
+    try:
+        from ..storage.database import AsyncSessionLocal
+        from ..storage.session_store import SessionStore
+
+        async with AsyncSessionLocal() as db:
+            store = SessionStore(db)
+            if not await store.get_session(session_id):
+                logger.warning(f"Skip persistence: session {session_id} does not exist")
+                return
+            await store.append_message(session_id, "user", query_text)
+            await store.append_message(
+                session_id,
+                "assistant",
+                answer,
+                thinking=thinking or None,
+                retrieved_docs=[doc.model_dump() for doc in retrieved_docs],
+            )
+
+        if history_count == 0:
+            from ..storage.naming import generate_session_title, rename_session_async
+
+            async def _rename_first_turn() -> None:
+                title = await generate_session_title(query_text)
+                await rename_session_async(session_id, title)
+
+            asyncio.create_task(_rename_first_turn())
+    except Exception as exc:
+        logger.warning(f"Failed to persist session turn: {exc}")
+
+
 @app.post("/api/v1/query", response_model=QueryResponse)
 async def query(req: QueryRequest):
     """同步问答（支持 session 历史）"""
@@ -117,9 +159,19 @@ async def query(req: QueryRequest):
         if results[0].score < REJECT_SCORE_THRESHOLD:
             preview_chunks, _ = build_context(results, top_n=min(3, len(results)))
             preview_text = "\n\n".join(preview_chunks) if preview_chunks else "（无）"
+            reject_answer = REJECT_MESSAGE.format(context=preview_text)
+            reject_docs = _retrieve_to_response(results, min(3, len(results)))[0]
+            await _persist_turn(
+                req.session_id,
+                req.query,
+                reject_answer,
+                "",
+                reject_docs,
+                len(history),
+            )
             return QueryResponse(
-                answer=REJECT_MESSAGE.format(context=preview_text),
-                retrieved_docs=_retrieve_to_response(results, min(3, len(results)))[0],
+                answer=reject_answer,
+                retrieved_docs=reject_docs,
                 citations=[],
                 trace_id=trace_id,
                 usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
@@ -162,48 +214,19 @@ async def query(req: QueryRequest):
         retrieved_docs, _ = _retrieve_to_response(results, req.top_n)
 
         # 5. 自动持久化到 session（如果提供了 session_id）
-        if req.session_id:
-            try:
-                from ..storage.database import AsyncSessionLocal
-                from ..storage.session_store import SessionStore
-
-                async with AsyncSessionLocal() as db:
-                    store = SessionStore(db)
-                    # 存 user 消息
-                    await store.append_message(req.session_id, "user", req.query)
-                    # 存 assistant 消息（含 thinking + retrieved_docs）
-                    await store.append_message(
-                        req.session_id,
-                        "assistant",
-                        clean_answer or raw_content,
-                        thinking=thinking_content,
-                        retrieved_docs=[d.model_dump() for d in retrieved_docs],
-                    )
-            except Exception as e:
-                # 持久化失败不影响主流程
-                logger.warning(f"Failed to persist messages: {e}")
-
-            # 6. 触发智能命名（异步后台任务，首条 query 时）
-            try:
-                import asyncio
-                from ..storage.naming import generate_session_title, rename_session_async
-                from ..storage.database import AsyncSessionLocal
-                from ..storage.session_store import SessionStore
-
-                async def _maybe_rename():
-                    async with AsyncSessionLocal() as db:
-                        store = SessionStore(db)
-                        session = await store.get_session(req.session_id, include_messages=False)
-                        if session and not session.get("title") or session.get("title") == "新对话":
-                            new_title = await generate_session_title(req.query)
-                            await rename_session_async(req.session_id, new_title)
-
-                asyncio.create_task(_maybe_rename())
-            except Exception as e:
-                logger.debug(f"Auto-naming skipped: {e}")
+        await _persist_turn(
+            req.session_id,
+            req.query,
+            clean_answer or raw_content,
+            thinking_content,
+            retrieved_docs,
+            len(history),
+        )
 
         return QueryResponse(
             answer=clean_answer or raw_content,  # 兜底：剥离失败就用原文
+            thinking=thinking_content,
+            has_thinking=bool(thinking_content),
             retrieved_docs=retrieved_docs,
             citations=[],  # Phase 2 解析 [1]、[2] 标注
             trace_id=trace_id,
@@ -226,13 +249,51 @@ async def stream(req: QueryRequest):
         yield {"event": "start", "data": json.dumps({"trace_id": trace_id, "query": req.query}, ensure_ascii=False)}
 
         try:
-            # 1. 检索
+            # 1. 加载会话历史并检索
+            from ..pipeline import format_history, load_history
+
+            history = await load_history(req.session_id) if req.session_id else []
             retrieve_start = time.time()
             results = retrieve(req.query, top_k=req.top_k, game=req.game)
             retrieve_took = (time.time() - retrieve_start) * 1000
 
             if not results:
                 yield {"event": "error", "data": json.dumps({"error": "知识库为空"}, ensure_ascii=False)}
+                return
+
+            from ..prompts.templates import REJECT_MESSAGE, REJECT_SCORE_THRESHOLD
+
+            if results[0].score < REJECT_SCORE_THRESHOLD:
+                preview_chunks, _ = build_context(results, top_n=min(3, len(results)))
+                preview_text = "\n\n".join(preview_chunks) if preview_chunks else "（无）"
+                reject_answer = REJECT_MESSAGE.format(context=preview_text)
+                retrieved_docs, _ = _retrieve_to_response(results, min(3, len(results)))
+                await _persist_turn(
+                    req.session_id,
+                    req.query,
+                    reject_answer,
+                    "",
+                    retrieved_docs,
+                    len(history),
+                )
+                yield {
+                    "event": "generation",
+                    "data": json.dumps({"delta": reject_answer}, ensure_ascii=False),
+                }
+                yield {
+                    "event": "done",
+                    "data": json.dumps(
+                        {
+                            "answer": reject_answer,
+                            "thinking": "",
+                            "has_thinking": False,
+                            "session_id": req.session_id,
+                            "retrieved_docs": [doc.model_dump() for doc in retrieved_docs],
+                            "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+                        },
+                        ensure_ascii=False,
+                    ),
+                }
                 return
 
             yield {
@@ -247,9 +308,12 @@ async def stream(req: QueryRequest):
             from ..prompts.thinking_parser import StreamThinkingParser
 
             llm = get_streaming_llm()
+            user_prompt = build_user_prompt(req.query, context_chunks, req.game or "")
+            if history:
+                user_prompt = format_history(history) + user_prompt
             messages = [
                 SystemMessage(content=SYSTEM_PROMPT),
-                HumanMessage(content=build_user_prompt(req.query, context_chunks, req.game or "")),
+                HumanMessage(content=user_prompt),
             ]
 
             parser = StreamThinkingParser()
@@ -279,8 +343,16 @@ async def stream(req: QueryRequest):
             if flush_thinking:
                 full_thinking += flush_thinking
 
-            # 4. 完成事件
+            # 4. 完成事件前持久化本轮消息
             retrieved_docs, _ = _retrieve_to_response(results, req.top_n)
+            await _persist_turn(
+                req.session_id,
+                req.query,
+                full_answer,
+                full_thinking,
+                retrieved_docs,
+                len(history),
+            )
             yield {
                 "event": "done",
                 "data": json.dumps(
@@ -288,6 +360,7 @@ async def stream(req: QueryRequest):
                         "answer": full_answer,
                         "thinking": full_thinking,
                         "has_thinking": bool(full_thinking),
+                        "session_id": req.session_id,
                         "retrieved_docs": [d.model_dump() for d in retrieved_docs],
                         "usage": {},
                     },
