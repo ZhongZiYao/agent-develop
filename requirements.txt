@@ -43,6 +43,10 @@ numpy>=1.26.0
 pandas>=2.2.0
 tiktoken>=0.6.0
 
+# Session 持久化（SQLite + 异步 ORM）
+sqlalchemy[asyncio]>=2.0.0
+aiosqlite>=0.20.0
+
 # 评测
 ragas>=0.1.0
 datasets>=2.18.0
