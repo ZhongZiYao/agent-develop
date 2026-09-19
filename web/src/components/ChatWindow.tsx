@@ -173,13 +173,19 @@ export function ChatWindow({ game, useStream, topK, topN, sessionId, onSessionCr
     let retrievedDocs: RetrievedDoc[] = [];
     let fullThinking = "";
 
-    for await (const event of streamQuery({
-      query: queryText,
-      game: game || undefined,
-      top_k: topK,
-      top_n: topN,
-      session_id: activeSessionId,
-    })) {
+    // 创建新的 AbortController
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
+    try {
+      for await (const event of streamQuery({
+        query: queryText,
+        game: game || undefined,
+        top_k: topK,
+        top_n: topN,
+        session_id: activeSessionId,
+        signal: controller.signal,
+      })) {
       if (event.event === "thinking") {
         fullThinking += (event.data.delta as string) || "";
         setMessages((prev) =>
@@ -217,6 +223,25 @@ export function ChatWindow({ game, useStream, topK, topN, sessionId, onSessionCr
               : m
           )
         );
+      }
+    }
+    } catch (err: any) {
+      // 如果是 abort，不显示错误
+      if (err.name === "AbortError") {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId
+              ? { ...m, content: fullAnswer || "已取消", streaming: false }
+              : m
+          )
+        );
+      } else {
+        throw err; // 重新抛出其他错误
+      }
+    } finally {
+      // 清理 AbortController
+      if (abortControllerRef.current === controller) {
+        abortControllerRef.current = null;
       }
     }
   }
@@ -269,6 +294,20 @@ export function ChatWindow({ game, useStream, topK, topN, sessionId, onSessionCr
             placeholder="问点什么吧…比如「妖刀姬 S13 怎么连招？」"
             className="flex-1 px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:bg-gray-50"
           />
+          {loading && abortControllerRef.current && (
+            <button
+              type="button"
+              onClick={() => {
+                abortControllerRef.current?.abort();
+                abortControllerRef.current = null;
+                setLoading(false);
+              }}
+              className="px-4 py-3 bg-red-500 text-white rounded-xl hover:bg-red-600 flex items-center gap-2"
+              title="取消请求"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
           <button
             type="submit"
             disabled={loading || !input.trim()}

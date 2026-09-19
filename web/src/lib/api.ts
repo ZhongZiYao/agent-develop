@@ -2,6 +2,9 @@
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
 
+// Feature Flag: 是否使用 LangGraph 端点
+const USE_LANGGRAPH = process.env.NEXT_PUBLIC_USE_LANGGRAPH === "true";
+
 export interface SessionListItem {
   id: string;
   title: string;
@@ -101,7 +104,10 @@ export async function* streamQuery(params: {
   event: string;
   data: Record<string, unknown>;
 }> {
-  const res = await fetch(`${API_BASE}/api/v1/stream`, {
+  // Feature Flag: 选择端点
+  const endpoint = USE_LANGGRAPH ? "/api/v1/chat-graph/stream" : "/api/v1/stream";
+
+  const res = await fetch(`${API_BASE}${endpoint}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
