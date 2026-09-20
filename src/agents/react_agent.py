@@ -16,6 +16,7 @@ from typing import Any
 from loguru import logger
 
 from ..llm import get_llm
+from .memory import add_failure_memory, retrieve_similar_memories
 from .tools import AGENT_TOOLS, get_tool_by_name, get_tools_description
 
 
@@ -73,6 +74,10 @@ class ReActAgent:
         # 构建历史记录
         history = self._format_scratchpad(scratchpad)
 
+        # 检索相似的失败经验
+        memories = await retrieve_similar_memories(query, top_k=2)
+        memory_context = self._format_memories(memories)
+
         prompt = f"""你是一个游戏攻略 AI Agent，使用 ReAct 框架回答用户问题。
 
 用户问题：{query}
@@ -82,6 +87,8 @@ class ReActAgent:
 
 已执行步骤：
 {history}
+
+{memory_context}
 
 请思考：
 1. 当前已经获得了哪些信息？
@@ -167,6 +174,22 @@ class ReActAgent:
             lines.append(f"Action: {action.get('tool')} with args {action.get('args')}")
             lines.append(f"Observation: {str(observation)[:200]}...")
             lines.append("")
+
+        return "\n".join(lines)
+
+    def _format_memories(self, memories: list[dict]) -> str:
+        """格式化 Memory 上下文"""
+        if not memories:
+            return ""
+
+        lines = ["过去的失败经验（供参考）："]
+        for i, mem in enumerate(memories, 1):
+            lines.append(f"\n经验 {i}:")
+            lines.append(f"- 查询：{mem['query']}")
+            lines.append(f"- 错误类型：{mem['error_type']}")
+            lines.append(f"- 尝试过的步骤：{mem['scratchpad_summary']}")
+            if mem.get('solution'):
+                lines.append(f"- 解决方案：{mem['solution']}")
 
         return "\n".join(lines)
 

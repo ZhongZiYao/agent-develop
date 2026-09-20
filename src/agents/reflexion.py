@@ -11,6 +11,7 @@ from __future__ import annotations
 from loguru import logger
 
 from ..llm import get_llm
+from .memory import add_failure_memory
 
 
 async def reflection_node(state: dict) -> dict:
@@ -117,6 +118,16 @@ Agent 执行了 {len(agent_scratchpad)} 步：
 
     # 决定是否需要重新规划
     need_replan = score < 3.0
+
+    # 如果质量低，记录到 Memory
+    if need_replan:
+        logger.info("[Evaluator] Low quality, recording to memory")
+        await add_failure_memory(
+            query=query,
+            error_type="low_quality_answer",
+            scratchpad=agent_scratchpad,
+            solution="",  # 解决方案将在 replan 后更新
+        )
 
     return {
         "evaluation_score": score,

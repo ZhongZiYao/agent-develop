@@ -4,11 +4,19 @@
 - Router: 查询路由（simple/agentic）
 - ReAct Agent: Thought → Action → Observation 循环
 - Reflexion: Reflection → Evaluator → Replan 自我纠错
-- Tools: rag_search, compare, finish
+- Memory: 记录失败经验，避免重复错误
+- Tools: rag_search, compare, calculate, summarize, finish
 - Agentic RAG Graph: 完整流程编排
 """
 
 from .agentic_rag_graph import build_agentic_rag_graph, run_agentic_rag
+from .memory import (
+    MemoryEntry,
+    MemoryStore,
+    add_failure_memory,
+    get_memory_store,
+    retrieve_similar_memories,
+)
 from .react_agent import ReActAgent, react_agent_node, should_continue
 from .reflexion import evaluator_node, reflection_node, replan_node
 from .router import router_node
@@ -22,6 +30,11 @@ __all__ = [
     "reflection_node",
     "evaluator_node",
     "replan_node",
+    "MemoryEntry",
+    "MemoryStore",
+    "get_memory_store",
+    "add_failure_memory",
+    "retrieve_similar_memories",
     "Tool",
     "AGENT_TOOLS",
     "get_tool_by_name",
