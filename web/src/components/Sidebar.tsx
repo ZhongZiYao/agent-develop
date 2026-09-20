@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Activity,
   Database,
@@ -11,6 +11,7 @@ import {
   Edit2,
   Check,
   X,
+  Search,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -31,6 +32,21 @@ interface Props {
   refreshKey?: number; // 触发刷新
 }
 
+function relativeTime(iso: string | null): string {
+  if (!iso) return "";
+  const now = Date.now();
+  const then = new Date(iso).getTime();
+  const diff = Math.max(0, now - then);
+  const m = Math.floor(diff / 60000);
+  if (m < 1) return "刚刚";
+  if (m < 60) return `${m} 分钟前`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h} 小时前`;
+  const d = Math.floor(h / 24);
+  if (d < 7) return `${d} 天前`;
+  return new Date(then).toLocaleDateString("zh-CN");
+}
+
 export function Sidebar({
   open,
   onToggle,
@@ -42,28 +58,33 @@ export function Sidebar({
   const [sessions, setSessions] = useState<SessionListItem[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
 
   async function loadSessions() {
     try {
-      const list = await listSessions();
+      const list = await listSessions(searchQuery || undefined);
       setSessions(list);
     } catch {
       // ignore
     }
   }
 
+  // 搜索防抖
+  useEffect(() => {
+    const t = setTimeout(() => loadSessions(), 200);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchQuery, refreshKey]);
+
   useEffect(() => {
     if (!open) return;
     checkHealth().then(setHealth).catch(() => setHealth(null));
   }, [open]);
 
-  useEffect(() => {
-    loadSessions();
-  }, [refreshKey]);
-
   async function handleNewSession() {
     try {
       const session = await createSession();
+      setSearchQuery("");
       await loadSessions();
       onSelectSession(session.id);
     } catch {
@@ -98,6 +119,21 @@ export function Sidebar({
     e.stopPropagation();
     setEditingId(null);
   }
+
+  // 按更新时间分组
+  const grouped = useMemo(() => {
+    const now = Date.now();
+    const today: SessionListItem[] = [];
+    const week: SessionListItem[] = [];
+    const older: SessionListItem[] = [];
+    sessions.forEach((s) => {
+      const diff = now - new Date(s.updated_at || 0).getTime();
+      if (diff < 24 * 3600 * 1000) today.push(s);
+      else if (diff < 7 * 24 * 3600 * 1000) week.push(s);
+      else older.push(s);
+    });
+    return { today, week, older };
+  }, [sessions]);
 
   if (!open) return null;
 
@@ -141,6 +177,26 @@ export function Sidebar({
           </button>
         </div>
 
+        {/* 搜索框 */}
+        <div className="relative mb-3">
+          <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="搜索会话..."
+            className="w-full pl-8 pr-3 py-1.5 text-xs border border-gray-200 rounded-md focus:outline-none focus:ring-1 focus:ring-primary-500"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery("")}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          )}
+        </div>
+
         {/* 新对话按钮（大） */}
         <button
           onClick={handleNewSession}
@@ -151,34 +207,108 @@ export function Sidebar({
         </button>
 
         {/* 列表 */}
-        <div className="space-y-1">
-          {sessions.length === 0 ? (
-            <div className="text-center text-xs text-gray-400 py-6">
-              还没有会话，点击"新对话"开始
-            </div>
-          ) : (
-            sessions.map((s) => (
-              <SessionItem
-                key={s.id}
-                session={s}
-                active={s.id === currentSessionId}
-                editing={editingId === s.id}
-                editTitle={editingTitle}
-                setEditTitle={setEditingTitle}
-                onSelect={() => onSelectSession(s.id)}
-                onDelete={(e) => handleDelete(s.id, e)}
-                onEdit={(e) => startEdit(s, e)}
-                onSave={(e) => {
-                  e.stopPropagation();
-                  handleSaveRename(s.id);
-                }}
+        {sessions.length === 0 ? (
+          <div className="text-center text-xs text-gray-400 py-6">
+            {searchQuery ? "未找到匹配的会话" : "还没有会话，点击\"新对话\"开始"}
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {/* 今天 */}
+            {grouped.today.length > 0 && (
+              <SessionGroup
+                label="今天"
+                sessions={grouped.today}
+                currentSessionId={currentSessionId}
+                editingId={editingId}
+                editingTitle={editingTitle}
+                setEditingTitle={setEditingTitle}
+                onSelectSession={onSelectSession}
+                onDelete={handleDelete}
+                onEdit={startEdit}
+                onSave={handleSaveRename}
                 onCancel={cancelEdit}
               />
-            ))
-          )}
-        </div>
+            )}
+            {/* 本周 */}
+            {grouped.week.length > 0 && (
+              <SessionGroup
+                label="本周"
+                sessions={grouped.week}
+                currentSessionId={currentSessionId}
+                editingId={editingId}
+                editingTitle={editingTitle}
+                setEditingTitle={setEditingTitle}
+                onSelectSession={onSelectSession}
+                onDelete={handleDelete}
+                onEdit={startEdit}
+                onSave={handleSaveRename}
+                onCancel={cancelEdit}
+              />
+            )}
+            {/* 更早 */}
+            {grouped.older.length > 0 && (
+              <SessionGroup
+                label="更早"
+                sessions={grouped.older}
+                currentSessionId={currentSessionId}
+                editingId={editingId}
+                editingTitle={editingTitle}
+                setEditingTitle={setEditingTitle}
+                onSelectSession={onSelectSession}
+                onDelete={handleDelete}
+                onEdit={startEdit}
+                onSave={handleSaveRename}
+                onCancel={cancelEdit}
+              />
+            )}
+          </div>
+        )}
       </div>
     </aside>
+  );
+}
+
+function SessionGroup({
+  label,
+  sessions,
+  ...itemProps
+}: {
+  label: string;
+  sessions: SessionListItem[];
+  currentSessionId: string | null;
+  editingId: string | null;
+  editingTitle: string;
+  setEditingTitle: (v: string) => void;
+  onSelectSession: (id: string | null) => void;
+  onDelete: (id: string, e: React.MouseEvent) => void;
+  onEdit: (s: SessionListItem, e: React.MouseEvent) => void;
+  onSave: (e: React.MouseEvent) => void;
+  onCancel: (e: React.MouseEvent) => void;
+}) {
+  return (
+    <div className="space-y-1">
+      <h4 className="text-[10px] font-semibold text-gray-400 uppercase px-1">
+        {label}
+      </h4>
+      {sessions.map((s) => (
+        <SessionItem
+          key={s.id}
+          session={s}
+          active={s.id === itemProps.currentSessionId}
+          editing={editingId === s.id}
+          editTitle={itemProps.editingTitle}
+          setEditTitle={itemProps.setEditingTitle}
+          onSelect={() => itemProps.onSelectSession(s.id)}
+          onDelete={(e) => itemProps.onDelete(s.id, e)}
+          onEdit={(e) => itemProps.onEdit(s, e)}
+          onSave={(e) => {
+            e.stopPropagation();
+            itemProps.onSave(s.id);
+          }}
+          onCancel={itemProps.onCancel}
+        />
+      ))}
+    </div>
   );
 }
 
@@ -284,11 +414,14 @@ function SessionItem({
                   "truncate",
                   active ? "font-medium text-gray-900" : "text-gray-700"
                 )}
+                title={session.title || "新对话"}
               >
                 {session.title || "新对话"}
               </div>
-              <div className="text-[10px] text-gray-400 mt-0.5">
-                {session.message_count} 条消息
+              <div className="text-[10px] text-gray-400 mt-0.5 flex items-center gap-1">
+                <span>{session.message_count} 条</span>
+                <span>·</span>
+                <span>{relativeTime(session.updated_at)}</span>
               </div>
             </>
           )}
