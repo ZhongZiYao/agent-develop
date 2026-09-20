@@ -1,0 +1,50 @@
+# Modular RAG 配置文件 - 简化版（无重排）
+# 适合快速响应场景，跳过耗时的重排步骤
+
+modules:
+  query_rewriter:
+    type: query_rewriter
+    enabled: true
+    params:
+      enable_rewrite: true
+      enable_expansion: false  # 关闭扩展加速
+      typo_map:
+        要到姬: 妖刀姬
+        怎末: 怎么
+        连召: 连招
+      game_terms:
+        - 妖刀姬
+        - 红蝶
+        - 素问
+        - 连招
+        - 技能
+        - 副本
+
+  hybrid_retriever:
+    type: hybrid_retriever
+    enabled: true
+    params:
+      vector_top_k: 10  # 减少召回量
+      use_expanded: false
+      fusion: rrf
+
+  reranker:
+    type: reranker
+    enabled: false  # 禁用重排
+
+  generator:
+    type: generator
+    enabled: true
+    params:
+      enable_thinking: false  # 关闭思考过程
+      max_context_docs: 3
+
+flow:
+  - query_rewriter
+  - hybrid_retriever
+  - generator  # 跳过 reranker
+
+metadata:
+  name: fast_rag_pipeline
+  version: "1.0"
+  description: "快速 RAG 流程：Query Rewriting → Retrieval → Generation（无重排）"

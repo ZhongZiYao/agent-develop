@@ -1,0 +1,76 @@
+# Modular RAG 配置文件
+# 定义 RAG 流程的模块组成和参数
+
+# 模块定义
+modules:
+  query_rewriter:
+    type: query_rewriter
+    enabled: true
+    params:
+      enable_rewrite: true
+      enable_expansion: true
+      typo_map:
+        要到姬: 妖刀姬
+        要刀姬: 妖刀姬
+        怎末: 怎么
+        连召: 连招
+      game_terms:
+        - 妖刀姬
+        - 红蝶
+        - 素问
+        - 宁红夜
+        - 顾清寒
+        - 连招
+        - 技能
+        - 振刀
+        - 蓄力
+        - 副本
+        - 冰火幻境
+        - S13
+        - S12
+        - 版本
+        - 更新
+        - 平衡性
+      synonyms:
+        连招: ["技能连击", "combo", "技能顺序", "出招"]
+        怎么玩: ["攻略", "玩法", "技巧", "教学"]
+        bug: ["错误", "问题", "异常", "故障"]
+        副本: ["PVE", "关卡", "挑战"]
+
+  hybrid_retriever:
+    type: hybrid_retriever
+    enabled: true
+    params:
+      vector_top_k: 50
+      bm25_top_k: 30
+      use_expanded: true
+      fusion: rrf
+      rrf_k: 60
+
+  reranker:
+    type: reranker
+    enabled: true
+    params:
+      model: BAAI/bge-reranker-v2-m3
+      device: cpu
+      top_n: 10
+
+  generator:
+    type: generator
+    enabled: true
+    params:
+      enable_thinking: true
+      max_context_docs: 5
+
+# 流程定义（顺序执行）
+flow:
+  - query_rewriter
+  - hybrid_retriever
+  - reranker
+  - generator
+
+# 元信息
+metadata:
+  name: default_rag_pipeline
+  version: "1.0"
+  description: "默认 RAG 流程：Query Rewriting → Hybrid Retrieval → Reranking → Generation"

@@ -10,6 +10,7 @@
 """
 
 from .base import ModuleConfig, ModuleRegistry, RAGModule
+from .builder import RAGGraphBuilder, build_graph_from_config
 from .generator import GeneratorModule
 from .query_rewriter import QueryRewriterModule
 from .reranker import RerankerModule
@@ -23,4 +24,6 @@ __all__ = [
     "HybridRetrieverModule",
     "RerankerModule",
     "GeneratorModule",
+    "RAGGraphBuilder",
+    "build_graph_from_config",
 ]
