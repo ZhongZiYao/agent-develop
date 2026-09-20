@@ -50,3 +50,11 @@ class AgentState(TypedDict):
     # ===== 规划相关（可选）=====
     plan: list[str]  # 子任务列表
     current_step: int  # 当前执行到第几步
+
+    # ===== Self-RAG（Phase 6.6）=====
+    need_retrieval: bool  # 是否需要 RAG 检索
+    self_rag_confidence: float  # Self-RAG 判断置信度（0-1）
+    self_rag_reason: str  # 判断理由
+
+    # ===== Agent Trace（Phase 6.7）=====
+    trace_events: list[dict]  # 所有节点的 trace 事件（时间线）

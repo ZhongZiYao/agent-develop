@@ -92,6 +92,12 @@ class Settings(BaseSettings):
     # ===== LangGraph Feature Flag =====
     use_langgraph: bool = Field(default=False, description="是否启用 LangGraph 端点")
 
+    # ===== Phase 6.6 Self-RAG =====
+    enable_self_rag: bool = Field(default=True, description="启用 Self-RAG 闸门（判断是否需要检索）")
+
+    # ===== Phase 6.7 Agent Trace =====
+    enable_agent_trace: bool = Field(default=True, description="启用 Agent Trace 推送（SSE 流式事件）")
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
