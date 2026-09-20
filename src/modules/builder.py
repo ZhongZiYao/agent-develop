@@ -17,7 +17,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, StateGraph
 from loguru import logger
 
-from ..graphs.state import RAGState
+from ..graphs.rag_state import RAGState
 from .base import ModuleConfig, ModuleRegistry, RAGModule
 
 

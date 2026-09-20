@@ -122,7 +122,7 @@ class HybridRetrieverModule(RAGModule):
 
         for results in result_lists:
             for rank, result in enumerate(results, start=1):
-                doc_id = result.chunk.id
+                doc_id = result.chunk.chunk_id
                 score = 1.0 / (self.rrf_k + rank)
                 doc_scores[doc_id] = doc_scores.get(doc_id, 0.0) + score
 
@@ -130,7 +130,7 @@ class HybridRetrieverModule(RAGModule):
         sorted_ids = sorted(doc_scores.items(), key=lambda x: x[1], reverse=True)
 
         # 返回重排后的文档（取第一个列表的对象）
-        id_to_result = {r.chunk.id: r for results in result_lists for r in results}
+        id_to_result = {r.chunk.chunk_id: r for results in result_lists for r in results}
         return [id_to_result[doc_id] for doc_id, _ in sorted_ids if doc_id in id_to_result]
 
     def _linear_fuse(self, vector_results: list, bm25_results: list, alpha: float = 0.7) -> list:
@@ -143,7 +143,7 @@ class HybridRetrieverModule(RAGModule):
         formatted = []
         for result in results:
             formatted.append({
-                "id": result.chunk.id,
+                "id": result.chunk.chunk_id,
                 "content": result.chunk.content,
                 "metadata": result.chunk.metadata,
                 "score": result.score,

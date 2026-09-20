@@ -57,29 +57,29 @@ class RerankerModule(RAGModule):
             logger.info(f"[{self.name}] Loading reranker model: {self.model_name}")
             self._reranker = get_reranker(self.model_name, self.device)
 
-        # 转换为 SearchResult 格式（reranker 需要）
-        from ..vectorstore.models import SearchResult, Chunk
+        # 转换为 RetrievalResult 格式
+        from ..schemas import RetrievalResult, Chunk
 
-        search_results = [
-            SearchResult(
+        retrieval_results = [
+            RetrievalResult(
                 chunk=Chunk(
-                    id=doc["id"],
                     content=doc["content"],
-                    metadata=doc["metadata"],
+                    metadata=doc.get("metadata", {}),
+                    chunk_id=doc.get("id", ""),
                 ),
-                score=doc["score"],
+                score=doc.get("score", 0.0),
             )
             for doc in retrieved_docs
         ]
 
         # 重排
-        logger.debug(f"[{self.name}] Reranking {len(search_results)} docs → top {self.top_n}")
-        reranked = self._reranker.rerank(query, search_results, top_n=self.top_n)
+        logger.debug(f"[{self.name}] Reranking {len(retrieval_results)} docs → top {self.top_n}")
+        reranked = self._reranker.rerank(query, retrieval_results, top_n=self.top_n)
 
         # 转回标准格式
         reranked_docs = [
             {
-                "id": r.chunk.id,
+                "id": r.chunk.chunk_id,
                 "content": r.chunk.content,
                 "metadata": r.chunk.metadata,
                 "score": r.score,

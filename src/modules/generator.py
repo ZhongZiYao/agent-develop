@@ -87,8 +87,8 @@ class GeneratorModule(RAGModule):
             # 解析思考过程和答案
             parser = StreamThinkingParser()
             parser.feed(response.content)
-            thinking = parser.get_thinking()
-            answer = parser.get_answer()
+            thinking = parser.get_full_thinking()
+            answer = parser.get_full_answer()
         else:
             # 不启用思考过程
             response = await self.llm.ainvoke(
