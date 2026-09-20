@@ -121,10 +121,21 @@ async def _persist_turn(
             )
 
         if history_count == 0:
-            from ..storage.naming import generate_session_title, rename_session_async
+            from ..storage.naming_v2 import (
+                generate_session_title,
+                rename_session_async,
+            )
 
             async def _rename_first_turn() -> None:
-                title = await generate_session_title(query_text)
+                # 把首轮检索结果作为 context，让 V2 命名能基于实际内容
+                context_text = "\n".join(
+                    (doc.content or "")[:200]
+                    for doc in (retrieved_docs or [])[:3]
+                )
+                title = await generate_session_title(
+                    query_text,
+                    context=context_text,
+                )
                 await rename_session_async(session_id, title)
 
             asyncio.create_task(_rename_first_turn())
