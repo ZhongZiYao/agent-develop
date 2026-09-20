@@ -271,7 +271,15 @@ export function Sidebar({
 function SessionGroup({
   label,
   sessions,
-  ...itemProps
+  currentSessionId,
+  editingId,
+  editingTitle,
+  setEditingTitle,
+  onSelectSession,
+  onDelete,
+  onEdit,
+  onSave,
+  onCancel,
 }: {
   label: string;
   sessions: SessionListItem[];
@@ -294,18 +302,18 @@ function SessionGroup({
         <SessionItem
           key={s.id}
           session={s}
-          active={s.id === itemProps.currentSessionId}
+          active={s.id === currentSessionId}
           editing={editingId === s.id}
-          editTitle={itemProps.editingTitle}
-          setEditTitle={itemProps.setEditingTitle}
-          onSelect={() => itemProps.onSelectSession(s.id)}
-          onDelete={(e) => itemProps.onDelete(s.id, e)}
-          onEdit={(e) => itemProps.onEdit(s, e)}
+          editTitle={editingTitle}
+          setEditTitle={setEditingTitle}
+          onSelect={() => onSelectSession(s.id)}
+          onDelete={(e) => onDelete(s.id, e)}
+          onEdit={(e) => onEdit(s, e)}
           onSave={(e) => {
             e.stopPropagation();
-            itemProps.onSave(s.id);
+            onSave(s.id);
           }}
-          onCancel={itemProps.onCancel}
+          onCancel={onCancel}
         />
       ))}
     </div>
