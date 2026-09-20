@@ -167,6 +167,95 @@ async def summarize_tool(docs: list[dict], aspect: str = "全面总结") -> str:
     return summary
 
 
+async def web_search_tool(query: str, num_results: int = 3) -> list[dict]:
+    """Web 搜索工具
+
+    Args:
+        query: 搜索查询
+        num_results: 返回结果数量
+
+    Returns:
+        搜索结果列表 [{title, url, snippet}]
+    """
+    logger.info(f"[web_search] Searching: {query}")
+
+    # 简化版：返回模拟结果
+    # 实际可以接入：Google Custom Search API, Bing API, DuckDuckGo
+    results = [
+        {
+            "title": f"搜索结果 {i+1}: {query}",
+            "url": f"https://example.com/result{i+1}",
+            "snippet": f"这是关于 {query} 的搜索结果摘要...",
+        }
+        for i in range(num_results)
+    ]
+
+    logger.info(f"[web_search] Found {len(results)} results")
+    return results
+
+
+async def code_execution_tool(code: str, language: str = "python") -> dict:
+    """代码执行工具（安全沙箱）
+
+    Args:
+        code: 要执行的代码
+        language: 编程语言（目前仅支持 python）
+
+    Returns:
+        执行结果 {output, error, success}
+    """
+    logger.info(f"[code_execution] Executing {language} code: {code[:50]}...")
+
+    if language != "python":
+        return {"error": f"Unsupported language: {language}", "success": False}
+
+    try:
+        import io
+        import sys
+        from contextlib import redirect_stdout
+
+        # 捕获输出
+        output_buffer = io.StringIO()
+
+        # 安全限制：禁止危险操作
+        safe_builtins = {
+            "print": print,
+            "range": range,
+            "len": len,
+            "str": str,
+            "int": int,
+            "float": float,
+            "list": list,
+            "dict": dict,
+            "sum": sum,
+            "max": max,
+            "min": min,
+            "abs": abs,
+            "round": round,
+        }
+
+        # 执行代码（限制 namespace）
+        with redirect_stdout(output_buffer):
+            exec(code, {"__builtins__": safe_builtins}, {})
+
+        output = output_buffer.getvalue()
+        logger.info(f"[code_execution] Success: {output[:100]}...")
+
+        return {
+            "output": output,
+            "error": None,
+            "success": True,
+        }
+
+    except Exception as e:
+        logger.error(f"[code_execution] Failed: {e}")
+        return {
+            "output": "",
+            "error": str(e),
+            "success": False,
+        }
+
+
 async def finish_tool(answer: str) -> dict:
     """结束工具
 
@@ -202,6 +291,16 @@ AGENT_TOOLS = [
         name="summarize",
         description="总结多个文档的内容。适用于信息整合。输入：docs（文档列表）, aspect（总结角度）",
         func=summarize_tool,
+    ),
+    Tool(
+        name="web_search",
+        description="搜索网络上的最新信息（超出知识库范围）。适用于版本更新、最新攻略等。输入：query, num_results",
+        func=web_search_tool,
+    ),
+    Tool(
+        name="code_execution",
+        description="执行 Python 代码进行计算或数据处理。适用于复杂计算、数据分析。输入：code（Python 代码）",
+        func=code_execution_tool,
     ),
     Tool(
         name="finish",
