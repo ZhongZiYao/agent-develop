@@ -1,7 +1,7 @@
 """Agentic RAG Graph
 
 组装完整的 Agentic RAG 流程：
-Router → Direct RAG / Agentic RAG (ReAct Loop)
+Router → Direct RAG / Agentic RAG (ReAct Loop + Reflexion)
 """
 
 from __future__ import annotations
@@ -12,18 +12,21 @@ from loguru import logger
 from ..graphs.agent_state import AgentState
 from ..modules import build_graph_from_config
 from .react_agent import react_agent_node, should_continue
+from .reflexion import evaluator_node, replan_node
 from .router import router_node
 
 
 async def build_agentic_rag_graph(
     direct_rag_config: str = "config/rag_modules.yaml",
     max_iterations: int = 5,
+    enable_reflexion: bool = True,
 ) -> StateGraph:
     """构建 Agentic RAG Graph
 
     Args:
         direct_rag_config: Direct RAG 配置文件路径
         max_iterations: Agent 最大迭代次数
+        enable_reflexion: 是否启用 Reflexion 自我纠错
 
     Returns:
         编译后的 StateGraph
@@ -65,10 +68,15 @@ async def build_agentic_rag_graph(
 
     graph.add_node("agentic_rag", agentic_rag_node)
 
-    # 4. 设置入口点
+    # 4. 添加 Evaluator 节点（Reflexion）
+    if enable_reflexion:
+        graph.add_node("evaluator", evaluator_node)
+        graph.add_node("replan", replan_node)
+
+    # 5. 设置入口点
     graph.set_entry_point("router")
 
-    # 5. 添加条件路由（Router → Direct RAG / Agentic RAG）
+    # 6. 添加条件路由（Router → Direct RAG / Agentic RAG）
     def route_decision(state: AgentState) -> str:
         """路由决策函数"""
         route = state.get("route", "direct_rag")
@@ -84,22 +92,57 @@ async def build_agentic_rag_graph(
         },
     )
 
-    # 6. Direct RAG 直接结束
+    # 7. Direct RAG 直接结束
     graph.add_edge("direct_rag", END)
 
-    # 7. Agentic RAG 循环或结束
-    graph.add_conditional_edges(
-        "agentic_rag",
-        should_continue,
-        {
-            "continue": "agentic_rag",  # 循环回自己
-            "end": END,
-        },
-    )
+    # 8. Agentic RAG 循环或评估
+    if enable_reflexion:
+        # 启用 Reflexion：agentic_rag → continue/evaluate
+        graph.add_conditional_edges(
+            "agentic_rag",
+            should_continue,
+            {
+                "continue": "agentic_rag",  # 继续循环
+                "end": "evaluator",  # 进入评估
+            },
+        )
 
-    # 8. 编译
+        # evaluator → end/replan
+        def evaluate_decision(state: AgentState) -> str:
+            """评估决策"""
+            need_replan = state.get("need_replan", False)
+            if need_replan:
+                logger.warning("[Graph] Quality low, replanning...")
+                return "replan"
+            else:
+                logger.info("[Graph] Quality acceptable, ending")
+                return "end"
+
+        graph.add_conditional_edges(
+            "evaluator",
+            evaluate_decision,
+            {
+                "replan": "replan",
+                "end": END,
+            },
+        )
+
+        # replan → agentic_rag (重新开始)
+        graph.add_edge("replan", "agentic_rag")
+    else:
+        # 不启用 Reflexion：直接循环或结束
+        graph.add_conditional_edges(
+            "agentic_rag",
+            should_continue,
+            {
+                "continue": "agentic_rag",
+                "end": END,
+            },
+        )
+
+    # 9. 编译
     compiled = graph.compile()
-    logger.info("Agentic RAG Graph compiled successfully")
+    logger.info(f"Agentic RAG Graph compiled (reflexion={enable_reflexion})")
 
     return compiled
 
@@ -111,6 +154,7 @@ async def run_agentic_rag(
     query: str,
     session_id: str = "default",
     max_iterations: int = 5,
+    enable_reflexion: bool = True,
 ) -> dict:
     """便捷函数：运行 Agentic RAG
 
@@ -118,11 +162,15 @@ async def run_agentic_rag(
         query: 用户查询
         session_id: 会话 ID
         max_iterations: 最大迭代次数
+        enable_reflexion: 是否启用 Reflexion 自我纠错
 
     Returns:
         结果字典
     """
-    graph = await build_agentic_rag_graph(max_iterations=max_iterations)
+    graph = await build_agentic_rag_graph(
+        max_iterations=max_iterations,
+        enable_reflexion=enable_reflexion,
+    )
 
     input_state = {
         "query": query,

@@ -85,6 +85,88 @@ async def compare_tool(entity_a: str, entity_b: str, aspect: str = "全面对比
     return comparison
 
 
+async def calculate_tool(expression: str) -> dict:
+    """计算工具
+
+    Args:
+        expression: 数学表达式（如 "1.2 * 100"）
+
+    Returns:
+        计算结果
+    """
+    logger.info(f"[calculate] Evaluating: {expression}")
+
+    try:
+        # 安全的数学计算（仅支持基本运算符）
+        import ast
+        import operator
+
+        # 支持的运算符
+        ops = {
+            ast.Add: operator.add,
+            ast.Sub: operator.sub,
+            ast.Mult: operator.mul,
+            ast.Div: operator.truediv,
+            ast.Pow: operator.pow,
+            ast.USub: operator.neg,
+        }
+
+        def eval_expr(node):
+            if isinstance(node, ast.Num):
+                return node.n
+            elif isinstance(node, ast.BinOp):
+                return ops[type(node.op)](eval_expr(node.left), eval_expr(node.right))
+            elif isinstance(node, ast.UnaryOp):
+                return ops[type(node.op)](eval_expr(node.operand))
+            else:
+                raise ValueError(f"Unsupported operation: {type(node)}")
+
+        result = eval_expr(ast.parse(expression, mode='eval').body)
+        logger.info(f"[calculate] Result: {result}")
+
+        return {"result": result, "expression": expression}
+
+    except Exception as e:
+        logger.error(f"[calculate] Failed: {e}")
+        return {"error": str(e), "expression": expression}
+
+
+async def summarize_tool(docs: list[dict], aspect: str = "全面总结") -> str:
+    """总结工具
+
+    Args:
+        docs: 文档列表
+        aspect: 总结角度
+
+    Returns:
+        总结文本
+    """
+    logger.info(f"[summarize] Summarizing {len(docs)} docs on aspect: {aspect}")
+
+    from ..llm import get_llm
+
+    llm = get_llm()
+
+    # 拼接文档内容
+    content = "\n\n---\n\n".join([doc.get("content", "") for doc in docs[:5]])
+
+    prompt = f"""请从"{aspect}"角度总结以下内容：
+
+{content[:2000]}...
+
+总结要求：
+- 简洁明了（3-5 句话）
+- 突出重点
+- 保持客观
+"""
+
+    response = await llm.ainvoke([{"role": "user", "content": prompt}])
+    summary = response.content.strip()
+
+    logger.info(f"[summarize] Summary generated: {len(summary)} chars")
+    return summary
+
+
 async def finish_tool(answer: str) -> dict:
     """结束工具
 
@@ -110,6 +192,16 @@ AGENT_TOOLS = [
         name="compare",
         description="对比两个实体（如角色、装备）。适用于'哪个更好'类问题。输入：entity_a, entity_b, aspect（对比维度）",
         func=compare_tool,
+    ),
+    Tool(
+        name="calculate",
+        description="执行数学计算。适用于伤害计算、性价比分析等。输入：expression（数学表达式，如 '1.2 * 100'）",
+        func=calculate_tool,
+    ),
+    Tool(
+        name="summarize",
+        description="总结多个文档的内容。适用于信息整合。输入：docs（文档列表）, aspect（总结角度）",
+        func=summarize_tool,
     ),
     Tool(
         name="finish",
