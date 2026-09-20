@@ -152,13 +152,23 @@ export function Sidebar({
           icon={<Cpu className="w-3.5 h-3.5" />}
           label="LLM"
           status={health?.components.llm_api}
-          detail={health?.components.llm_api || "未配置"}
+          detail={
+            health?.components.llm_api?.includes("minimax")
+              ? "minimax (云端)"
+              : health?.components.llm_api?.includes("ollama")
+              ? "Ollama (本地)"
+              : health?.components.llm_api || "未配置"
+          }
         />
         <StatusCard
           icon={<Activity className="w-3.5 h-3.5" />}
-          label="Ollama"
+          label="Embedding"
           status={health?.components.ollama}
-          detail="bge-m3"
+          detail={
+            health?.components.ollama === "ok" || health?.components.ollama?.includes("ollama")
+              ? "bge-m3 (本地)"
+              : "未连接"
+          }
         />
       </div>
 
@@ -335,6 +345,7 @@ function StatusCard({
     status === "ok" ||
     status === "configured" ||
     status?.startsWith("ollama:") ||
+    status?.startsWith("minimax:") ||
     status?.endsWith(":configured");
   return (
     <div className="px-2.5 py-1.5 mb-1 bg-white border border-gray-100 rounded-md text-xs">
