@@ -1,0 +1,111 @@
+# Modular RAG 配置文件 - 自适应路由版
+# 根据查询类型动态选择处理路径
+
+modules:
+  # 路由器（入口）
+  adaptive_router:
+    type: adaptive_router
+    enabled: true
+    params:
+      enable_classification: false  # 使用启发式分类（快速）
+      route_map:
+        factual: simple_retrieve
+        analytical: analytical_retrieve
+        conversational: conversational_retrieve
+        ambiguous: simple_retrieve  # 模糊查询也走简单路径
+
+  # Query 重写器
+  query_rewriter:
+    type: query_rewriter
+    enabled: true
+    params:
+      enable_rewrite: true
+      enable_expansion: true
+      typo_map:
+        要到姬: 妖刀姬
+        怎末: 怎么
+        连召: 连招
+      game_terms:
+        - 妖刀姬
+        - 红蝶
+        - 素问
+        - 连招
+        - 技能
+        - 副本
+
+  # 简单检索（事实查询）
+  simple_retriever:
+    type: hybrid_retriever
+    enabled: true
+    params:
+      vector_top_k: 10
+      use_expanded: false
+
+  # 分析检索（分析查询，召回更多）
+  analytical_retriever:
+    type: hybrid_retriever
+    enabled: true
+    params:
+      vector_top_k: 30
+      use_expanded: true
+
+  # 对话检索（对话查询，考虑历史）
+  conversational_retriever:
+    type: hybrid_retriever
+    enabled: true
+    params:
+      vector_top_k: 15
+      use_expanded: false
+
+  # 重排器
+  reranker:
+    type: reranker
+    enabled: true
+    params:
+      model: BAAI/bge-reranker-v2-m3
+      device: cpu
+      top_n: 5
+
+  # 生成器
+  generator:
+    type: generator
+    enabled: true
+    params:
+      enable_thinking: true
+      max_context_docs: 5
+
+# 条件流程（根据路由决策）
+flow:
+  # 入口：路由决策
+  - adaptive_router
+
+  # 分支 1：简单路径（factual + ambiguous）
+  simple_path:
+    - query_rewriter
+    - simple_retriever
+    - generator
+
+  # 分支 2：分析路径（analytical）
+  analytical_path:
+    - query_rewriter
+    - analytical_retriever
+    - reranker
+    - generator
+
+  # 分支 3：对话路径（conversational）
+  conversational_path:
+    - query_rewriter
+    - conversational_retriever
+    - generator
+
+# 路由映射
+routing:
+  adaptive_router:
+    simple_retrieve: simple_path
+    analytical_retrieve: analytical_path
+    conversational_retrieve: conversational_path
+
+metadata:
+  name: adaptive_rag_pipeline
+  version: "1.0"
+  description: "自适应 RAG 流程：根据查询类型动态选择处理路径"

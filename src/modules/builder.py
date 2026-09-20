@@ -34,11 +34,12 @@ class RAGGraphBuilder:
         """从配置 dict 初始化
 
         Args:
-            config: 包含 modules、flow、metadata 的配置字典
+            config: 包含 modules、flow、metadata、routing（可选）的配置字典
         """
         self.config = config
         self.modules: dict[str, RAGModule] = {}
-        self.flow: list[str] = config.get("flow", [])
+        self.flow: list[str] | dict = config.get("flow", [])
+        self.routing = config.get("routing", {})
         self.metadata = config.get("metadata", {})
 
     @classmethod
@@ -122,7 +123,17 @@ class RAGGraphBuilder:
             logger.debug(f"Instantiated module: {name} ({module_cls.__name__})")
 
     def _connect_flow(self, graph: StateGraph) -> None:
-        """连接流程（顺序执行）"""
+        """连接流程（支持顺序和条件路由）"""
+        # 判断是简单顺序流程还是条件路由
+        if isinstance(self.flow, list):
+            self._connect_sequential_flow(graph)
+        elif isinstance(self.flow, dict):
+            self._connect_conditional_flow(graph)
+        else:
+            raise ValueError(f"Invalid flow type: {type(self.flow)}")
+
+    def _connect_sequential_flow(self, graph: StateGraph) -> None:
+        """连接顺序流程"""
         if not self.flow:
             raise ValueError("Flow is empty, cannot connect nodes")
 
@@ -147,6 +158,73 @@ class RAGGraphBuilder:
         if last_node in self.modules:
             graph.add_edge(last_node, END)
             logger.debug(f"Connected: {last_node} → END")
+
+    def _connect_conditional_flow(self, graph: StateGraph) -> None:
+        """连接条件流程（自适应路由）"""
+        # flow 是 dict: {entry: [node1, node2], path1: [nodes], path2: [nodes]}
+        # routing: {router_node: {route_key: path_name}}
+
+        # 1. 找到入口节点（第一个单元素的 key）
+        entry_nodes = [node for node in self.flow if isinstance(self.flow[node], str)]
+        if not entry_nodes:
+            # 取第一个列表作为主路径
+            entry_path = list(self.flow.keys())[0]
+            entry_node = self.flow[entry_path][0] if self.flow[entry_path] else None
+        else:
+            entry_node = entry_nodes[0]
+
+        if not entry_node:
+            raise ValueError("Cannot determine entry node from conditional flow")
+
+        graph.set_entry_point(entry_node)
+        logger.debug(f"Entry point: {entry_node}")
+
+        # 2. 连接条件路由
+        if self.routing and entry_node in self.routing:
+            route_map = self.routing[entry_node]
+
+            def routing_func(state: dict) -> str:
+                """根据 state 中的 route 字段决定下一个节点"""
+                route = state.get("route", "")
+                path_name = route_map.get(route)
+
+                if path_name and path_name in self.flow:
+                    # 返回路径的第一个节点
+                    path = self.flow[path_name]
+                    return path[0] if path else END
+
+                # 默认路径
+                return END
+
+            # 添加条件边
+            graph.add_conditional_edges(
+                entry_node,
+                routing_func,
+                # 映射所有可能的路径
+                {path[0]: path[0] for path_name, path in self.flow.items()
+                 if isinstance(path, list) and path}
+            )
+            logger.debug(f"Added conditional edges from {entry_node}")
+
+        # 3. 连接每个路径内部的顺序流程
+        for path_name, path_nodes in self.flow.items():
+            if not isinstance(path_nodes, list):
+                continue
+
+            for i in range(len(path_nodes) - 1):
+                src = path_nodes[i]
+                dst = path_nodes[i + 1]
+
+                if src not in self.modules or dst not in self.modules:
+                    continue
+
+                graph.add_edge(src, dst)
+                logger.debug(f"Connected (path {path_name}): {src} → {dst}")
+
+            # 路径最后节点连接到 END
+            if path_nodes and path_nodes[-1] in self.modules:
+                graph.add_edge(path_nodes[-1], END)
+                logger.debug(f"Connected (path {path_name}): {path_nodes[-1]} → END")
 
     def _make_node_func(self, module: RAGModule):
         """包装 RAGModule 为 LangGraph 节点函数

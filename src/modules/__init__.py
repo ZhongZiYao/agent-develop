@@ -15,6 +15,7 @@ from .generator import GeneratorModule
 from .query_rewriter import QueryRewriterModule
 from .reranker import RerankerModule
 from .retriever import HybridRetrieverModule
+from .router import AdaptiveRouterModule
 
 __all__ = [
     "RAGModule",
@@ -24,6 +25,7 @@ __all__ = [
     "HybridRetrieverModule",
     "RerankerModule",
     "GeneratorModule",
+    "AdaptiveRouterModule",
     "RAGGraphBuilder",
     "build_graph_from_config",
 ]
