@@ -24,3 +24,8 @@ class GameDocumentItem(scrapy.Item):
     publish_date = scrapy.Field()    # 发布日期（ISO 8601 字符串）
     language = scrapy.Field()        # 'zh' / 'en'，默认 'zh'
     raw_json = scrapy.Field()        # 原始 JSON / API 响应（调试用）
+
+    # 清洗后字段（pipeline 写入）
+    clean_text = scrapy.Field()      # 清洗后正文（Markdown）
+    word_count = scrapy.Field()      # 字符数
+    quality_score = scrapy.Field()   # 质量分 0-1

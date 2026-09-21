@@ -3,6 +3,7 @@
 目标游戏：阴阳师（onmyoji），可扩展到原神 / 明日方舟 / 王者荣耀。
 URL 模式：https://{game}. fandom.com/wiki/{PageName}
 """
+import os
 import re
 from typing import Any
 from urllib.parse import urljoin, urlparse
@@ -37,8 +38,8 @@ class FandomSpider(scrapy.Spider):
     ]
 
     custom_settings = {
-        "DOWNLOAD_DELAY": 1.5,          # Fandom 限速更严
-        "CONCURRENT_REQUESTS_PER_DOMAIN": 2,
+        "DOWNLOAD_DELAY": 2.0,          # Fandom 限速更严 + Cloudflare 友好
+        "CONCURRENT_REQUESTS_PER_DOMAIN": 1,  # 串行最稳（避免被 Cloudflare 弹）
     }
 
     def __init__(
@@ -55,6 +56,9 @@ class FandomSpider(scrapy.Spider):
         self.base_url = f"https://{self.game}.fandom.com"
         self.max_pages = max_pages
         self.page_count = 0
+
+        # 代理：Fandom 在国内被 Cloudflare 拦截，必须经过代理才能拿到 200
+        self.proxy_url = os.getenv("CRAWLER_PROXY")  # e.g. "http://127.0.0.1:7890"
 
         # 起始 URL
         if start_urls:
@@ -76,6 +80,12 @@ class FandomSpider(scrapy.Spider):
     def allowed_domains(self) -> list[str]:
         return [urlparse(self.base_url).netloc]
 
+    def _proxy_kwargs(self) -> dict[str, Any]:
+        """每个请求都带的 meta（注入代理）。"""
+        if self.proxy_url:
+            return {"proxy": self.proxy_url}
+        return {}
+
     def parse(self, response: Any) -> Any:
         """入口页 / 列表页：解析出详情页 URL 继续跟进。"""
         if self.page_count >= self.max_pages:
@@ -93,7 +103,14 @@ class FandomSpider(scrapy.Spider):
             # 跳过 main page / 主页（一般无攻略价值）
             if "Main_Page" in href or "Special:" in href:
                 continue
-            yield response.follow(href, self.parse_page, priority=1)
+            # 带 Referer 头（Fandom/CDN 会校验）+ 代理 meta（爬虫注入到 download handler）
+            yield response.follow(
+                href,
+                self.parse_page,
+                priority=1,
+                dont_filter=False,
+                meta=self._proxy_kwargs(),
+            )
 
     def parse_page(self, response: Any) -> Any:
         """详情页：解析正文 + 元数据。"""

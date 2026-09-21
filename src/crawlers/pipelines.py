@@ -82,6 +82,7 @@ class HtmlCleaningPipeline:
 
     处理：
     - trafilatura 提取正文（HTML → 纯文本）
+    - 失败时降级到 BeautifulSoup 提取 .mw-parser-output
     - 编码统一（UTF-8）
     - 字段标准化（language / crawl_ts）
     - 计算 quality_score（长度 + 链接密度）
@@ -97,7 +98,8 @@ class HtmlCleaningPipeline:
         if not raw_html:
             raise DropItem(f"Missing raw_html doc_id={adapter.get('doc_id')}")
 
-        # trafilatura 提取正文（返回 Markdown）
+        # 优先 trafilatura 提取（精准但 wiki 模板页会返回 None）
+        extracted = None
         try:
             extracted = trafilatura.extract(
                 raw_html,
@@ -108,7 +110,26 @@ class HtmlCleaningPipeline:
                 favor_recall=True,
             )
         except Exception as exc:
-            raise DropItem(f"trafilatura failed doc_id={adapter.get('doc_id')}: {exc}")
+            logger.warning(f"trafilatura exception doc_id={adapter.get('doc_id')}: {exc}")
+
+        # 降级：BeautifulSoup 提取 .mw-parser-output（Fandom 标准正文容器）
+        if not extracted or len(extracted.strip()) < self.min_text_length:
+            try:
+                from bs4 import BeautifulSoup
+                soup = BeautifulSoup(raw_html, "html.parser")
+                # Fandom / MediaWiki 正文容器
+                main = soup.select_one(".mw-parser-output") or soup.select_one("#mw-content-text")
+                if main:
+                    # 去除脚本/样式/导航
+                    for tag in main.select("script, style, .navbox, .toc, .infobox"):
+                        tag.decompose()
+                    fallback_text = main.get_text(separator="\n", strip=True)
+                    if len(fallback_text.strip()) > len((extracted or '').strip()):
+                        extracted = fallback_text
+            except ImportError:
+                pass
+            except Exception as exc:
+                logger.warning(f"BeautifulSoup fallback failed doc_id={adapter.get('doc_id')}: {exc}")
 
         if not extracted or len(extracted.strip()) < self.min_text_length:
             raise DropItem(
