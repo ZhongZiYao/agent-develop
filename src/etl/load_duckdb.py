@@ -149,6 +149,11 @@ def load_documents_to_dwd(
     if not parquet_path.exists():
         logger.warning(f"{parquet_path} 不存在，跳过 documents 加载")
         return 0
+    # DELETE then INSERT 以支持增量（按 doc_id 去重）
+    con.execute(
+        "DELETE FROM dwd.documents WHERE doc_id IN (SELECT doc_id FROM read_parquet(?))",
+        [str(parquet_path)],
+    )
     con.execute(
         "INSERT INTO dwd.documents SELECT * FROM read_parquet(?)",
         [str(parquet_path)],
@@ -168,6 +173,11 @@ def load_chunks_to_dwd(
     if not parquet_path.exists():
         logger.warning(f"{parquet_path} 不存在，跳过 chunks 加载")
         return 0
+    # 增量：先删同 doc_id 旧 chunks，再 INSERT
+    con.execute(
+        "DELETE FROM dwd.chunks WHERE doc_id IN (SELECT doc_id FROM read_parquet(?))",
+        [str(parquet_path)],
+    )
     con.execute(
         "INSERT INTO dwd.chunks SELECT * FROM read_parquet(?)",
         [str(parquet_path)],
@@ -191,6 +201,11 @@ def load_embeddings_to_dwd(
         logger.warning(f"{parquet_path} 不存在，跳过 embeddings 加载")
         return 0
     # DuckDB 会自动把 list[float] 解析为 FLOAT[1024]
+    # 增量：先删同 chunk_id 旧 embeddings，再 INSERT
+    con.execute(
+        "DELETE FROM dwd.embeddings WHERE chunk_id IN (SELECT chunk_id FROM read_parquet(?))",
+        [str(parquet_path)],
+    )
     con.execute(
         "INSERT INTO dwd.embeddings SELECT chunk_id, embedding::FLOAT[1024], model "
         "FROM read_parquet(?)",

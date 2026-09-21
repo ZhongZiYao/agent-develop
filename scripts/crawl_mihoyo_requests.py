@@ -112,6 +112,16 @@ def fetch_post_detail(post_id: str, game: str) -> dict | None:
         or (datetime.fromtimestamp(int(publish_ts), tz=timezone.utc).isoformat() if publish_ts else None)
     )
 
+    # 计算质量分（与 HtmlCleaningPipeline 一致）
+    word_count = len(body_md)
+    if word_count < 200:
+        quality = 0.3
+    elif word_count > 50000:
+        quality = 0.5
+    else:
+        quality = min(1.0, 0.5 + word_count / 5000)
+    quality_score = round(quality, 3)
+
     return {
         "doc_id": _make_doc_id("mihoyo", game, pid),
         "source": "mihoyo",
@@ -122,6 +132,8 @@ def fetch_post_detail(post_id: str, game: str) -> dict | None:
         "publish_date": publish_date,
         "language": "zh",
         "clean_text": body_md,
+        "word_count": word_count,
+        "quality_score": quality_score,
         "metadata": {
             "post_id": pid,
             "view_num": stat.get("view_num", 0),
