@@ -20,10 +20,13 @@ CHROMA_PERSIST_DIR = Path(getattr(settings, "chroma_persist_dir", DATA_ROOT / "c
 def load_to_chroma(
     chunks_parquet: Path = CLEAN_DIR / "chunks.parquet",
     embeddings_parquet: Path = CLEAN_DIR / "embeddings.parquet",
-    collection_name: str = "gameguide_phase7",
+    collection_name: str = None,
     batch_size: int = 5000,
 ) -> int:
     """把 chunks + embeddings 写入 Chroma。
+
+    Args:
+        collection_name: None 时使用 settings.chroma_collection_name
 
     Returns:
         写入的 chunk 总数
@@ -34,6 +37,10 @@ def load_to_chroma(
     if not chunks_parquet.exists() or not embeddings_parquet.exists():
         logger.warning("chunks.parquet 或 embeddings.parquet 不存在，跳过")
         return 0
+
+    # 使用系统配置的 collection name
+    if collection_name is None:
+        collection_name = settings.chroma_collection_name
 
     chunks_df = pd.read_parquet(chunks_parquet)
     embeddings_df = pd.read_parquet(embeddings_parquet)
