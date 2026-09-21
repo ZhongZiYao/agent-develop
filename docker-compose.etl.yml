@@ -1,0 +1,79 @@
+# Phase 7 ETL 容器编排（独立于主 API 栈）
+#
+# 用法：
+#   docker compose -f docker-compose.etl.yml up -d
+#
+# 服务：
+#   - postgres:    元数据 / 任务运行日志 / 数据血缘
+#   - qdrant:      向量库 sidecar（演示 Chroma vs Qdrant）
+#   - airflow:     调度系统（standalone，单机版）
+#
+# 注意：
+#   - 数据卷全部映射到本地 E 盘，重启不丢
+#   - 端口不冲突：PG=5433 / Qdrant=6333 / Airflow=8081
+#   - 主 API 栈（8000 / 3000）不影响
+
+services:
+  # ===== PostgreSQL（OLTP 元数据）=====
+  postgres:
+    image: postgres:16-alpine
+    container_name: gameguide-postgres
+    ports:
+      - "5433:5432"            # 避开主 5432
+    environment:
+      - POSTGRES_USER=gameguide
+      - POSTGRES_PASSWORD=gameguide_dev
+      - POSTGRES_DB=gameguide_meta
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gameguide"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ===== Qdrant（向量库 sidecar）=====
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: gameguide-qdrant
+    ports:
+      - "6333:6333"            # REST API
+      - "6334:6334"            # gRPC API
+    volumes:
+      - qdrant_data:/qdrant/storage
+    restart: unless-stopped
+
+  # ===== Airflow standalone（单机调度）=====
+  airflow:
+    image: apache/airflow:2.8.0-python3.11
+    container_name: gameguide-airflow
+    ports:
+      - "8081:8080"            # Web UI
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://gameguide:gameguide_dev@postgres:5432/gameguide_meta
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - AIRFLOW__WEBSERVER__EXPOSE_CONFIG=True
+      - AIRFLOW_HOME=/opt/airflow
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      - ./airflow/plugins:/opt/airflow/plugins
+      - ./src:/opt/airflow/src       # DAG 可直接 import src.*
+      - ./data:/opt/airflow/data
+    command: >
+      bash -c "
+        airflow db init &&
+        airflow users create --username admin --firstname Admin --lastname User --role Admin --password admin --email admin@example.com || true &&
+        airflow webserver --port 8080 &
+        airflow scheduler
+      "
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  qdrant_data:

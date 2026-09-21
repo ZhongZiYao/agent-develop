@@ -1,0 +1,169 @@
+# GameGuide AI — Python Project (uv)
+
+# 此文件由 uv 管理（替代 requirements.txt）。
+# 用法：
+#   uv sync                  # 安装基础依赖
+#   uv sync --extra gpu      # 加 GPU 推理（sentence-transformers + torch CUDA）
+#   uv sync --extra airflow  # 加 Airflow（建议独立 venv）
+#   uv sync --all-extras     # 全装（开发机）
+
+[project]
+name = "gameguide-ai"
+version = "0.7.0"
+description = "Agentic RAG system for game guide QA — Phase 7 ETL pipeline"
+requires-python = ">=3.11,<3.13"
+readme = "README.md"
+
+dependencies = [
+    # ===== Web 框架 =====
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.27.0",
+    "sse-starlette>=2.0.0",
+
+    # ===== Pydantic =====
+    "pydantic>=2.6.0",
+    "pydantic-settings>=2.2.0",
+
+    # ===== LangChain 生态 =====
+    "langchain>=0.2.0",
+    "langchain-community>=0.2.0",
+    "langchain-core>=0.3.0",
+    "langchain-ollama>=0.3.0",
+    "langgraph>=0.2.55",
+    "langgraph-checkpoint-sqlite>=2.0.0",
+
+    # ===== LLM 客户端 =====
+    "openai>=1.30.0",
+    "anthropic>=0.30.0",
+    "httpx>=0.27.0",
+
+    # ===== Embedding / Reranker =====
+    "transformers>=4.35.0",
+    "sentencepiece>=0.1.99",
+
+    # ===== 向量库 =====
+    "chromadb>=0.5.0",
+    "qdrant-client>=1.7.0",  # Phase 7: Qdrant sidecar 客户端
+
+    # ===== BM25 =====
+    "rank-bm25>=0.2.2",
+
+    # ===== 文档处理 =====
+    "pypdf>=4.0.0",
+    "pymupdf>=1.24.0",
+    "beautifulsoup4>=4.12.0",
+    "markdown>=3.5.0",
+
+    # ===== 数据处理 =====
+    "numpy>=1.26.0",
+    "pandas>=2.2.0",
+    "pyarrow>=15.0.0",        # Phase 7: Parquet 列存
+    "duckdb>=0.10.0",         # Phase 7: OLAP 数仓
+    "tiktoken>=0.6.0",
+
+    # ===== Phase 7: 爬虫 =====
+    "scrapy>=2.11.0",
+    "trafilatura>=1.6.0",
+    "markdownify>=0.11.0",
+    "htmldate>=1.8.0",
+
+    # ===== Phase 7: 中文 NLP =====
+    "jieba>=0.42.0",
+
+    # ===== 数据库 =====
+    "sqlalchemy[asyncio]>=2.0.0",
+    "aiosqlite>=0.20.0",
+    "psycopg[binary]>=3.1.0",  # Phase 7: PostgreSQL
+
+    # ===== 评测 =====
+    "ragas>=0.1.0",
+    "datasets>=2.18.0",
+
+    # ===== 可观测 =====
+    "langsmith>=0.1.0",
+
+    # ===== 工具 =====
+    "python-dotenv>=1.0.0",
+    "loguru>=0.7.0",
+    "tenacity>=8.2.0",
+    "tqdm>=4.66.0",
+]
+
+[project.optional-dependencies]
+# ===== GPU 推理（核心：bge-m3 + Reranker）=====
+gpu = [
+    "sentence-transformers>=2.7.0",
+    "torch>=2.2.0",  # PyTorch CUDA 12.x，由 uv 解析具体 wheel
+]
+
+# ===== Airflow（独立装，避免污染主环境）=====
+airflow = [
+    "apache-airflow>=2.8.0",
+]
+
+# ===== 数据分析 / 可视化 =====
+analysis = [
+    "jupyter>=1.0.0",
+    "plotly>=5.20.0",
+    "streamlit>=1.30.0",
+]
+
+# ===== 开发 =====
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.1.0",
+    "black>=24.1.0",
+    "ruff>=0.3.0",
+    "mypy>=1.8.0",
+    "ipykernel>=6.29.0",
+]
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.1.0",
+    "ruff>=0.3.0",
+]
+
+# ===== ruff 配置 =====
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+]
+ignore = [
+    "E501",  # line too long (用 formatter)
+    "B008",  # do not perform function calls in argument defaults
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011"]  # asserts 在测试里 OK
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+asyncio_mode = "auto"
+markers = [
+    "integration: 集成测试（需 INTEGRATION_TESTS=1）",
+    "slow: 慢测试",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]

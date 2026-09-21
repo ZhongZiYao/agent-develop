@@ -98,6 +98,38 @@ class Settings(BaseSettings):
     # ===== Phase 6.7 Agent Trace =====
     enable_agent_trace: bool = Field(default=True, description="启用 Agent Trace 推送（SSE 流式事件）")
 
+    # ===== Phase 7 ETL 流水线 =====
+    # 数据根目录
+    data_dir: str = Field(default=str(PROJECT_ROOT / "data"), description="数据根目录")
+
+    # DuckDB 数仓
+    warehouse_dir: str = Field(default=str(PROJECT_ROOT / "data" / "warehouse"))
+    duckdb_path: str = Field(default=str(PROJECT_ROOT / "data" / "warehouse" / "gameguide.duckdb"))
+
+    # Qdrant sidecar
+    qdrant_host: str = Field(default="localhost")
+    qdrant_port: int = Field(default=6333)
+    qdrant_collection_name: str = Field(default="gameguide_phase7")
+
+    # Chroma Phase 7 新 collection
+    chroma_phase7_collection: str = Field(default="gameguide_phase7")
+
+    # Embedding 模型（Phase 7 用本地 HuggingFace）
+    embedding_model: str = Field(default="BAAI/bge-m3", description="HuggingFace sentence-transformers 模型名")
+    embedding_dim: int = Field(default=1024)
+    embedding_device: str = Field(default="cuda", description="cuda / cpu / mps")
+    embedding_batch_size: int = Field(default=32, description="GPU 推荐 32 / CPU 推荐 8")
+    embedding_fp16: bool = Field(default=True, description="GPU 推理 FP16")
+
+    # Scrapy 爬虫限速
+    crawl_download_delay: float = Field(default=1.5, description="单请求间隔（秒）")
+    crawl_concurrent_per_domain: int = Field(default=2)
+
+    # ETL 转换参数
+    etl_chunk_size: int = Field(default=500)
+    etl_chunk_overlap: int = Field(default=50)
+    etl_min_quality_score: float = Field(default=0.3, description="低于此分丢弃")
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
