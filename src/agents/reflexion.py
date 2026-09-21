@@ -132,6 +132,17 @@ Agent 执行了 {len(agent_scratchpad)} 步：
     return {
         "evaluation_score": score,
         "need_replan": need_replan,
+        "trace_events": [
+            *list(state.get("trace_events") or []),
+            {
+                "ts": __import__("time").time(),
+                "node": "evaluator",
+                "type": "agent_reflect",
+                "score": score,
+                "need_replan": need_replan,
+                "reason": evaluation_text[:200],
+            },
+        ],
     }
 
 

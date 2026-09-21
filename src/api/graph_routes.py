@@ -10,6 +10,25 @@ Phase 2 增强：
 1. 自动消息持久化（user + assistant → sessions.db）
 2. token-level 流式输出（LLM astream_events 替代单次响应）
 3. 完整的 retrieved_docs 和 metadata 返回
+
+Phase 6.7 SSE 事件协议：
+
+向后兼容事件（旧前端识别）：
+- retrieval: {chunks_retrieved, node, latency_ms}
+- thinking: {delta}
+- generation: {delta}
+- done: {answer, thinking, has_thinking, session_id, retrieved_docs, trace_id, trace_events}
+- error: {error}
+
+新增 Agent Trace 事件（前端可选消费）：
+- agent_trace: {node, status: started|completed, ts, payload}
+  - 任何节点进入/退出都触发（包括 retrieve/generate/router/self_rag_judge/...）
+- agent_step: {ts, node: agentic_rag, type: agent_step, iteration, status, thought_preview, action, observation_preview}
+  - ReAct 每轮迭代后触发
+- agent_reflect: {ts, node: evaluator, type: agent_reflect, score, need_replan, reason}
+  - Reflexion 评估后触发
+- agent_done: {total_nodes, ts}
+  - 所有节点完成后触发一次（done 之前）
 """
 
 from __future__ import annotations
@@ -170,12 +189,20 @@ async def chat_graph_stream(req: QueryRequest):
     - done 事件包含完整结果
 
     自动保存消息到 SessionStore。
+
+    Phase 6.7 增强（Agent Trace）：
+    - 所有节点切换都产生 agent_trace 事件（不只 retrieve/generate）
+    - ReAct 步骤产生 agent_step 事件
+    - Reflexion 评分产生 agent_reflect 事件
+    - done 事件 payload 增 trace_events 字段
     """
     if not settings.use_langgraph:
         raise HTTPException(
             status_code=503,
             detail="LangGraph feature is disabled. Set USE_LANGGRAPH=true to enable.",
         )
+
+    enable_agent_trace = settings.enable_agent_trace
 
     async def event_generator() -> AsyncIterator[dict]:
         trace_id = f"graph-stream-{uuid.uuid4().hex[:12]}"
@@ -198,11 +225,27 @@ async def chat_graph_stream(req: QueryRequest):
             full_answer = ""
             full_thinking = ""
             retrieved_count = 0
+            trace_events: list[dict] = []  # 累积 trace 事件
 
             # 使用 stream_mode="updates" 流式获取每个节点的更新
             async for event in graph.astream(input_state, config=config, stream_mode="updates"):
                 node_name = list(event.keys())[0]
                 update = event[node_name]
+
+                # Agent Trace: 节点进入
+                if enable_agent_trace:
+                    yield {
+                        "event": "agent_trace",
+                        "data": json.dumps(
+                            {
+                                "node": node_name,
+                                "status": "started",
+                                "ts": time.time(),
+                                "payload": {},
+                            },
+                            ensure_ascii=False,
+                        ),
+                    }
 
                 if node_name == "retrieve":
                     # 检索节点：发送 retrieval 事件
@@ -244,6 +287,33 @@ async def chat_graph_stream(req: QueryRequest):
 
                     logger.debug(f"[{trace_id}] Generated {len(answer)} chars")
 
+                else:
+                    # 未知节点（旧 Modular RAG 不会有，但有 Future-proof 兜底）
+                    logger.debug(f"[{trace_id}] Node {node_name} completed: {list(update.keys())}")
+
+                # Agent Trace: 节点完成
+                if enable_agent_trace:
+                    yield {
+                        "event": "agent_trace",
+                        "data": json.dumps(
+                            {
+                                "node": node_name,
+                                "status": "completed",
+                                "ts": time.time(),
+                                "payload": {
+                                    "keys": list(update.keys())[:5],  # 最多 5 个 key
+                                },
+                            },
+                            ensure_ascii=False,
+                        ),
+                    }
+                    # 同时累积到 trace_events（供 done 返回）
+                    trace_events.append({
+                        "node": node_name,
+                        "status": "completed",
+                        "ts": time.time(),
+                    })
+
                 await asyncio.sleep(0)
 
             # 获取最终状态
@@ -254,6 +324,19 @@ async def chat_graph_stream(req: QueryRequest):
             retrieved_docs = [
                 doc for doc in state_values.get("retrieved_docs", [])
             ][:10]  # Top 10
+
+            # Agent Trace: done
+            if enable_agent_trace:
+                yield {
+                    "event": "agent_done",
+                    "data": json.dumps(
+                        {
+                            "total_nodes": len(trace_events),
+                            "ts": time.time(),
+                        },
+                        ensure_ascii=False,
+                    ),
+                }
 
             # 发送完成事件
             yield {
@@ -268,6 +351,7 @@ async def chat_graph_stream(req: QueryRequest):
                         "usage": {},
                         "latency_ms": int((time.time() - start) * 1000),
                         "trace_id": trace_id,
+                        "trace_events": trace_events if enable_agent_trace else [],  # Phase 6.7
                     },
                     ensure_ascii=False,
                 ),

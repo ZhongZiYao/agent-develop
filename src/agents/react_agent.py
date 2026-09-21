@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from typing import Any
 
 from loguru import logger
@@ -32,6 +33,7 @@ class ReActAgent:
         query = state.get("query", "")
         agent_scratchpad = state.get("agent_scratchpad", [])
         iterations = state.get("iterations", 0)
+        trace_events = list(state.get("trace_events") or [])  # Phase 6.7
 
         logger.info(f"[ReActAgent] Starting iteration {iterations + 1}/{self.max_iterations}")
 
@@ -55,18 +57,32 @@ class ReActAgent:
             "observation": observation,
         })
 
-        # 5. 检查是否结束
+        # 5. Phase 6.7: push agent_step event 到 trace_events
+        trace_events.append({
+            "ts": time.time(),
+            "node": "agentic_rag",
+            "type": "agent_step",
+            "iteration": iterations + 1,
+            "status": "completed",
+            "thought_preview": thought[:200],  # 截断
+            "action": action,
+            "observation_preview": str(observation)[:300],
+        })
+
+        # 6. 检查是否结束
         if action.get("tool") == "finish":
             return {
                 "answer": action.get("args", {}).get("answer", ""),
                 "agent_scratchpad": agent_scratchpad,
                 "iterations": iterations + 1,
+                "trace_events": trace_events,
             }
 
-        # 6. 更新状态
+        # 7. 更新状态
         return {
             "agent_scratchpad": agent_scratchpad,
             "iterations": iterations + 1,
+            "trace_events": trace_events,
         }
 
     async def _think(self, query: str, scratchpad: list[dict]) -> str:
