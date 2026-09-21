@@ -12,6 +12,7 @@ import {
 } from "@/lib/api";
 import { Markdown } from "./Markdown";
 import { ThinkingPanel } from "./ThinkingPanel";
+import { AgentSteps, AgentStep, AgentStepKind } from "./AgentSteps";
 
 interface Message {
   id: string;
@@ -21,6 +22,10 @@ interface Message {
   retrieved_docs?: RetrievedDoc[];
   streaming?: boolean;
   latency_ms?: number;
+  // Phase 6.9: Agent Trace 时间线
+  steps?: AgentStep[];
+  // Phase 6.9: Self-RAG 判断结果（可选展示）
+  selfRag?: { needRetrieval: boolean; confidence: number; reason: string };
 }
 
 interface Props {
@@ -165,6 +170,7 @@ export function ChatWindow({ game, useStream, topK, topN, sessionId, onSessionCr
         content: "",
         streaming: useStream,
         retrieved_docs: [],
+        steps: [],  // Phase 6.9: Agent Trace 时间线
       };
 
       // 更新当前会话的 messages 和 loading
@@ -277,17 +283,39 @@ export function ChatWindow({ game, useStream, topK, topN, sessionId, onSessionCr
           forceUpdate({});
         } else if (event.event === "done") {
           retrievedDocs = (event.data.retrieved_docs as RetrievedDoc[]) || [];
-          currentSession.messages = currentSession.messages.map((m) =>
-            m.id === assistantId
-              ? {
-                  ...m,
-                  content: fullAnswer,
-                  thinking: fullThinking,
-                  retrieved_docs: retrievedDocs,
-                  streaming: false,
-                }
-              : m
-          );
+          // 把后端返回的 trace_events 合并到 steps（如有）
+          const backendTraces = (event.data.trace_events as any[]) || [];
+          currentSession.messages = currentSession.messages.map((m) => {
+            if (m.id !== assistantId) return m;
+            const existingSteps = m.steps || [];
+            // 如果后端 trace_events 没合并到前端 steps（说明事件流被忽略），补一下
+            if (existingSteps.length === 0 && backendTraces.length > 0) {
+              return {
+                ...m,
+                content: fullAnswer,
+                thinking: fullThinking,
+                retrieved_docs: retrievedDocs,
+                streaming: false,
+                steps: backendTraces.map((t: any, idx: number) => ({
+                  id: `trace-${idx}`,
+                  kind: "router" as AgentStepKind,
+                  node: t.node || "unknown",
+                  title: "",
+                  detail: "",
+                  status: "completed" as const,
+                  ts: t.ts || Date.now(),
+                  payload: t,
+                })),
+              };
+            }
+            return {
+              ...m,
+              content: fullAnswer,
+              thinking: fullThinking,
+              retrieved_docs: retrievedDocs,
+              streaming: false,
+            };
+          });
           forceUpdate({});
         } else if (event.event === "error") {
           currentSession.messages = currentSession.messages.map((m) =>
@@ -296,6 +324,21 @@ export function ChatWindow({ game, useStream, topK, topN, sessionId, onSessionCr
               : m
           );
           forceUpdate({});
+        } else if (event.event === "agent_trace") {
+          // Phase 6.9: 节点进入/退出
+          appendAgentTrace(currentSession, assistantId, event.data, forceUpdate);
+        } else if (event.event === "agent_step") {
+          // Phase 6.9: ReAct 单步
+          appendAgentStep(currentSession, assistantId, event.data, forceUpdate);
+        } else if (event.event === "agent_reflect") {
+          // Phase 6.9: Reflexion 评分
+          appendAgentReflect(currentSession, assistantId, event.data, forceUpdate);
+        } else if (event.event === "agent_tool_call") {
+          // Phase 6.9: 工具调用
+          appendAgentToolCall(currentSession, assistantId, event.data, forceUpdate);
+        } else if (event.event === "agent_done") {
+          // Phase 6.9: 所有节点完成 → 把所有 running 标 completed
+          finalizeAgentSteps(currentSession, assistantId, forceUpdate);
         }
       }
     } catch (err: any) {
@@ -441,6 +484,15 @@ function MessageBubble({ message }: { message: Message }) {
           />
         )}
 
+        {/* Phase 6.9: Agent Steps 时间线（仅 assistant 显示） */}
+        {!isUser && message.steps && message.steps.length > 0 && (
+          <AgentSteps
+            steps={message.steps}
+            isStreaming={message.streaming}
+            className="mb-1"
+          />
+        )}
+
         <div
           className={`px-4 py-3 rounded-2xl ${
             isUser
@@ -507,4 +559,188 @@ function MessageBubble({ message }: { message: Message }) {
       </div>
     </div>
   );
+}
+
+// ===== Phase 6.9: Agent Trace 事件映射辅助函数 =====
+
+function nodeNameToKind(node: string): AgentStepKind {
+  switch (node) {
+    case "router": return "router";
+    case "self_rag_judge": return "self_rag";
+    case "llm_only_answer": return "llm_only";
+    case "retrieve":
+    case "retrieval":
+      return "retrieve";
+    case "agentic_rag": return "think";
+    case "evaluator": return "reflect";
+    case "replan": return "replan";
+    default: return "router";
+  }
+}
+
+function pushStep(
+  session: { messages: Message[] },
+  assistantId: string,
+  step: AgentStep,
+  forceUpdate: (s: any) => void,
+) {
+  session.messages = session.messages.map((m) =>
+    m.id === assistantId
+      ? { ...m, steps: [...(m.steps || []), step] }
+      : m
+  );
+  forceUpdate({});
+}
+
+function appendAgentTrace(
+  session: { messages: Message[] },
+  assistantId: string,
+  data: Record<string, unknown>,
+  forceUpdate: (s: any) => void,
+) {
+  const node = (data.node as string) || "unknown";
+  const status = (data.status as "running" | "completed" | "failed") || "started";
+  const ts = (data.ts as number) || Date.now();
+
+  pushStep(
+    session,
+    assistantId,
+    {
+      id: `trace-${ts}-${Math.random().toString(36).slice(2, 6)}`,
+      kind: nodeNameToKind(node),
+      node,
+      title: "",
+      detail: "",
+      status,
+      ts,
+      payload: data.payload as Record<string, unknown> | undefined,
+    },
+    forceUpdate,
+  );
+}
+
+function appendAgentStep(
+  session: { messages: Message[] },
+  assistantId: string,
+  data: Record<string, unknown>,
+  forceUpdate: (s: any) => void,
+) {
+  const iteration = data.iteration as number | undefined;
+  const ts = (data.ts as number) || Date.now();
+
+  // 找同 iteration 的 running think step，in-place 更新；找不到则 append
+  const messages = session.messages;
+  const idx = messages.findIndex((m) => m.id === assistantId);
+  if (idx === -1) return;
+  const msg = messages[idx];
+  const steps = [...(msg.steps || [])];
+
+  if (iteration !== undefined) {
+    const existingIdx = steps.findIndex(
+      (s) => s.iteration === iteration && s.kind === "think" && s.status !== "completed",
+    );
+    if (existingIdx >= 0) {
+      steps[existingIdx] = {
+        ...steps[existingIdx],
+        thoughtPreview: (data.thought_preview as string) || steps[existingIdx].thoughtPreview,
+        action: (data.action as any) || steps[existingIdx].action,
+        observationPreview: (data.observation_preview as string) || steps[existingIdx].observationPreview,
+        status: "completed",
+        ts,
+      };
+      session.messages = messages.map((m, i) =>
+        i === idx ? { ...m, steps } : m
+      );
+      forceUpdate({});
+      return;
+    }
+  }
+
+  // 否则新增一个 step
+  pushStep(
+    session,
+    assistantId,
+    {
+      id: `step-${ts}-${Math.random().toString(36).slice(2, 6)}`,
+      kind: "think",
+      node: "agentic_rag",
+      title: "",
+      detail: "",
+      status: "completed",
+      iteration,
+      ts,
+      thoughtPreview: data.thought_preview as string | undefined,
+      action: data.action as any,
+      observationPreview: data.observation_preview as string | undefined,
+    },
+    forceUpdate,
+  );
+}
+
+function appendAgentReflect(
+  session: { messages: Message[] },
+  assistantId: string,
+  data: Record<string, unknown>,
+  forceUpdate: (s: any) => void,
+) {
+  const ts = (data.ts as number) || Date.now();
+  pushStep(
+    session,
+    assistantId,
+    {
+      id: `reflect-${ts}`,
+      kind: "reflect",
+      node: "evaluator",
+      title: `评分 ${data.score}/5${data.need_replan ? " → 触发重新规划" : ""}`,
+      detail: (data.reason as string) || "",
+      status: "completed",
+      ts,
+      score: data.score as number,
+      needReplan: data.need_replan as boolean,
+    },
+    forceUpdate,
+  );
+}
+
+function appendAgentToolCall(
+  session: { messages: Message[] },
+  assistantId: string,
+  data: Record<string, unknown>,
+  forceUpdate: (s: any) => void,
+) {
+  const ts = (data.ts as number) || Date.now();
+  pushStep(
+    session,
+    assistantId,
+    {
+      id: `tool-${ts}-${Math.random().toString(36).slice(2, 6)}`,
+      kind: "tool_call",
+      node: "agentic_rag",
+      title: `调用 ${data.tool}`,
+      detail: "",
+      status: "completed",
+      iteration: data.iteration as number | undefined,
+      ts,
+      action: { tool: data.tool as string, args: (data.args as Record<string, unknown>) || {} },
+      observationPreview: data.output_preview as string | undefined,
+    },
+    forceUpdate,
+  );
+}
+
+function finalizeAgentSteps(
+  session: { messages: Message[] },
+  assistantId: string,
+  forceUpdate: (s: any) => void,
+) {
+  session.messages = session.messages.map((m) => {
+    if (m.id !== assistantId) return m;
+    return {
+      ...m,
+      steps: (m.steps || []).map((s) =>
+        s.status === "running" ? { ...s, status: "completed" as const } : s
+      ),
+    };
+  });
+  forceUpdate({});
 }
