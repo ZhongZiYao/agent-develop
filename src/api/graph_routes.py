@@ -44,7 +44,8 @@ from langchain_core.messages import AIMessage
 from loguru import logger
 from sse_starlette.sse import EventSourceResponse
 
-from ..config import settings
+from ..agents.agentic_rag_graph import build_agentic_rag_graph
+from ..config import get_settings, settings
 from ..graphs import get_rag_graph_async
 from ..llm import get_streaming_llm
 from ..prompts.thinking_parser import StreamThinkingParser
@@ -202,180 +203,227 @@ async def chat_graph_stream(req: QueryRequest):
             detail="LangGraph feature is disabled. Set USE_LANGGRAPH=true to enable.",
         )
 
-    enable_agent_trace = settings.enable_agent_trace
+    # 每次请求重新读 settings，避免 monkeypatch/env 切换不生效
+    enable_agent_trace = get_settings().enable_agent_trace
 
-    async def event_generator() -> AsyncIterator[dict]:
-        trace_id = f"graph-stream-{uuid.uuid4().hex[:12]}"
-        start = time.time()
+    graph = await get_rag_graph_async()
+    return EventSourceResponse(_stream_events(req, graph, enable_agent_trace, "graph-stream"))
 
-        try:
-            graph = await get_rag_graph_async()
 
-            input_state = {
-                "query": req.query,
-                "game": req.game or "",
-                "session_id": req.session_id or f"temp-{uuid.uuid4().hex[:8]}",
-                "top_k": req.top_k,
-                "top_n": req.top_n,
-                "messages": [],
-            }
+async def _stream_events(
+    req: QueryRequest,
+    graph,
+    enable_agent_trace: bool,
+    trace_prefix: str,
+) -> AsyncIterator[dict]:
+    """通用流式事件生成器
 
-            config = {"configurable": {"thread_id": req.session_id or "default"}}
+    支持两种 graph：
+    - Modular RAG Graph (retrieve → generate)
+    - Agentic RAG Graph (router → self_rag → direct/agentic → evaluator)
 
-            full_answer = ""
-            full_thinking = ""
-            retrieved_count = 0
-            trace_events: list[dict] = []  # 累积 trace 事件
+    Args:
+        req: 用户请求
+        graph: 编译后的 LangGraph
+        enable_agent_trace: 是否推送 agent_trace / agent_done
+        trace_prefix: trace_id 前缀（用于日志区分）
+    """
+    trace_id = f"{trace_prefix}-{uuid.uuid4().hex[:12]}"
+    start = time.time()
 
-            # 使用 stream_mode="updates" 流式获取每个节点的更新
-            async for event in graph.astream(input_state, config=config, stream_mode="updates"):
-                node_name = list(event.keys())[0]
-                update = event[node_name]
+    try:
+        input_state = {
+            "query": req.query,
+            "game": req.game or "",
+            "session_id": req.session_id or f"temp-{uuid.uuid4().hex[:8]}",
+            "top_k": req.top_k,
+            "top_n": req.top_n,
+            "messages": [],
+        }
 
-                # Agent Trace: 节点进入
-                if enable_agent_trace:
-                    yield {
-                        "event": "agent_trace",
-                        "data": json.dumps(
-                            {
-                                "node": node_name,
-                                "status": "started",
-                                "ts": time.time(),
-                                "payload": {},
-                            },
-                            ensure_ascii=False,
-                        ),
-                    }
+        config = {"configurable": {"thread_id": req.session_id or "default"}}
 
-                if node_name == "retrieve":
-                    # 检索节点：发送 retrieval 事件
-                    docs = update.get("retrieved_docs", [])
-                    retrieved_count = len(docs)
-                    yield {
-                        "event": "retrieval",
-                        "data": json.dumps(
-                            {
-                                "chunks_retrieved": retrieved_count,
-                                "node": "retrieve",
-                                "latency_ms": int((time.time() - start) * 1000),
-                            },
-                            ensure_ascii=False,
-                        ),
-                    }
-                    logger.debug(f"[{trace_id}] Retrieved {retrieved_count} docs")
+        full_answer = ""
+        full_thinking = ""
+        retrieved_count = 0
+        trace_events: list[dict] = []
 
-                elif node_name == "generate":
-                    # 生成节点：发送完整答案（非流式，因为 Graph 的 generate 节点本身就是非流式的）
-                    answer = update.get("answer", "")
-                    thinking = update.get("thinking", "")
-                    full_answer = answer
-                    full_thinking = thinking
+        # 使用 stream_mode="updates" 流式获取每个节点的更新
+        async for event in graph.astream(input_state, config=config, stream_mode="updates"):
+            node_name = list(event.keys())[0]
+            update = event[node_name]
 
-                    # 发送 thinking（如果有）
-                    if thinking:
-                        yield {
-                            "event": "thinking",
-                            "data": json.dumps({"delta": thinking}, ensure_ascii=False),
-                        }
-
-                    # 发送 answer
-                    if answer:
-                        yield {
-                            "event": "generation",
-                            "data": json.dumps({"delta": answer}, ensure_ascii=False),
-                        }
-
-                    logger.debug(f"[{trace_id}] Generated {len(answer)} chars")
-
-                else:
-                    # 未知节点（旧 Modular RAG 不会有，但有 Future-proof 兜底）
-                    logger.debug(f"[{trace_id}] Node {node_name} completed: {list(update.keys())}")
-
-                # Agent Trace: 节点完成
-                if enable_agent_trace:
-                    yield {
-                        "event": "agent_trace",
-                        "data": json.dumps(
-                            {
-                                "node": node_name,
-                                "status": "completed",
-                                "ts": time.time(),
-                                "payload": {
-                                    "keys": list(update.keys())[:5],  # 最多 5 个 key
-                                },
-                            },
-                            ensure_ascii=False,
-                        ),
-                    }
-                    # 同时累积到 trace_events（供 done 返回）
-                    trace_events.append({
-                        "node": node_name,
-                        "status": "completed",
-                        "ts": time.time(),
-                    })
-
-                await asyncio.sleep(0)
-
-            # 获取最终状态
-            final_state = await graph.aget_state(config)
-            state_values = final_state.values
-
-            # 提取 retrieved_docs 用于 done 事件
-            retrieved_docs = [
-                doc for doc in state_values.get("retrieved_docs", [])
-            ][:10]  # Top 10
-
-            # Agent Trace: done
+            # Agent Trace: 节点进入
             if enable_agent_trace:
                 yield {
-                    "event": "agent_done",
+                    "event": "agent_trace",
                     "data": json.dumps(
                         {
-                            "total_nodes": len(trace_events),
+                            "node": node_name,
+                            "status": "started",
                             "ts": time.time(),
+                            "payload": {},
                         },
                         ensure_ascii=False,
                     ),
                 }
 
-            # 发送完成事件
+            if node_name == "retrieve":
+                docs = update.get("retrieved_docs", [])
+                retrieved_count = len(docs)
+                yield {
+                    "event": "retrieval",
+                    "data": json.dumps(
+                        {
+                            "chunks_retrieved": retrieved_count,
+                            "node": "retrieve",
+                            "latency_ms": int((time.time() - start) * 1000),
+                        },
+                        ensure_ascii=False,
+                    ),
+                }
+                logger.debug(f"[{trace_id}] Retrieved {retrieved_count} docs")
+
+            elif node_name in ("generate", "llm_only_answer"):
+                # generate（Modular Graph）+ llm_only_answer（Agentic Graph）都生成最终答案
+                answer = update.get("answer", "")
+                thinking = update.get("thinking", "")
+                full_answer = answer
+                full_thinking = thinking
+
+                if thinking:
+                    yield {
+                        "event": "thinking",
+                        "data": json.dumps({"delta": thinking}, ensure_ascii=False),
+                    }
+
+                if answer:
+                    yield {
+                        "event": "generation",
+                        "data": json.dumps({"delta": answer}, ensure_ascii=False),
+                    }
+
+                logger.debug(f"[{trace_id}] {node_name} produced {len(answer)} chars")
+
+            else:
+                # 未知节点（旧 Modular RAG 不会有，但有 Future-proof 兜底）
+                logger.debug(f"[{trace_id}] Node {node_name} completed: {list(update.keys())}")
+
+            # Agent Trace: 节点完成
+            if enable_agent_trace:
+                yield {
+                    "event": "agent_trace",
+                    "data": json.dumps(
+                        {
+                            "node": node_name,
+                            "status": "completed",
+                            "ts": time.time(),
+                            "payload": {
+                                "keys": list(update.keys())[:5],
+                            },
+                        },
+                        ensure_ascii=False,
+                    ),
+                }
+                trace_events.append({
+                    "node": node_name,
+                    "status": "completed",
+                    "ts": time.time(),
+                })
+
+            await asyncio.sleep(0)
+
+        # 获取最终状态（agentic graph 无 checkpointer 时会抛 No checkpointer set，
+        # 此时 agentic 不依赖 state 持久化，安全降级为 None）
+        state_values: dict = {}
+        try:
+            final_state = await graph.aget_state(config)
+            state_values = final_state.values or {}
+        except Exception as exc:
+            logger.debug(f"[{trace_id}] aget_state skipped: {exc}")
+
+        # 提取 retrieved_docs 用于 done 事件
+        retrieved_docs = [
+            doc for doc in state_values.get("retrieved_docs", [])
+        ][:10]
+
+        # Agent Trace: done
+        if enable_agent_trace:
             yield {
-                "event": "done",
+                "event": "agent_done",
                 "data": json.dumps(
                     {
-                        "answer": full_answer,
-                        "thinking": full_thinking,
-                        "has_thinking": bool(full_thinking),
-                        "session_id": req.session_id,
-                        "retrieved_docs": retrieved_docs,
-                        "usage": {},
-                        "latency_ms": int((time.time() - start) * 1000),
-                        "trace_id": trace_id,
-                        "trace_events": trace_events if enable_agent_trace else [],  # Phase 6.7
+                        "total_nodes": len(trace_events),
+                        "ts": time.time(),
                     },
                     ensure_ascii=False,
                 ),
             }
 
-            # 异步持久化
-            asyncio.create_task(
-                _persist_turn(
-                    req.session_id,
-                    req.query,
-                    full_answer,
-                    full_thinking,
-                    state_values.get("retrieved_docs", []),
-                    is_first_turn=False,
-                )
+        # 发送完成事件
+        yield {
+            "event": "done",
+            "data": json.dumps(
+                {
+                    "answer": full_answer,
+                    "thinking": full_thinking,
+                    "has_thinking": bool(full_thinking),
+                    "session_id": req.session_id,
+                    "retrieved_docs": retrieved_docs,
+                    "usage": {},
+                    "latency_ms": int((time.time() - start) * 1000),
+                    "trace_id": trace_id,
+                    "trace_events": trace_events if enable_agent_trace else [],
+                },
+                ensure_ascii=False,
+            ),
+        }
+
+        # 异步持久化
+        asyncio.create_task(
+            _persist_turn(
+                req.session_id,
+                req.query,
+                full_answer,
+                full_thinking,
+                state_values.get("retrieved_docs", []),
+                is_first_turn=False,
             )
+        )
 
-            logger.info(
-                f"[{trace_id}] LangGraph stream completed in "
-                f"{int((time.time() - start) * 1000)}ms"
-            )
+        logger.info(
+            f"[{trace_id}] LangGraph stream completed in "
+            f"{int((time.time() - start) * 1000)}ms"
+        )
 
-        except Exception as e:
-            logger.error(f"[{trace_id}] LangGraph stream failed: {e}")
-            yield {"event": "error", "data": json.dumps({"error": str(e)}, ensure_ascii=False)}
+    except Exception as e:
+        logger.error(f"[{trace_id}] LangGraph stream failed: {e}")
+        yield {"event": "error", "data": json.dumps({"error": str(e)}, ensure_ascii=False)}
 
-    return EventSourceResponse(event_generator())
+
+@router.post("/chat-agentic/stream")
+async def chat_agentic_stream(req: QueryRequest):
+    """流式问答（Agentic RAG 版本 — Phase 4 + 6.6~6.10 整合）
+
+    走 build_agentic_rag_graph：
+    - Router → Self-RAG 闸门 → Direct RAG / LLM 直答 / Agentic RAG (ReAct + Reflexion)
+    - 暴露 router / self_rag_judge / llm_only_answer / agentic_rag / evaluator / replan 等节点
+    - SSE 事件含 agent_trace / agent_done，前端可走 AgentSteps 时间线
+
+    与 /chat-graph/stream 区别：
+    - /chat-graph/stream: 走旧 Modular RAG（retrieve → generate），向后兼容
+    - /chat-agentic/stream: 走 Agentic RAG（带 Self-RAG/ReAct/Reflexion）
+
+    同样受 ENABLE_SELF_RAG / ENABLE_AGENT_TRACE 控制。
+    """
+    if not get_settings().use_langgraph:
+        raise HTTPException(
+            status_code=503,
+            detail="LangGraph feature is disabled. Set USE_LANGGRAPH=true to enable.",
+        )
+
+    enable_agent_trace = get_settings().enable_agent_trace
+    graph = await build_agentic_rag_graph()
+    return EventSourceResponse(
+        _stream_events(req, graph, enable_agent_trace, "agentic-stream")
+    )

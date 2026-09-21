@@ -13,6 +13,14 @@ import {
 import { Markdown } from "./Markdown";
 import { ThinkingPanel } from "./ThinkingPanel";
 import { AgentSteps, AgentStep, AgentStepKind } from "./AgentSteps";
+import {
+  nodeNameToKind,
+  mapAgentTrace,
+  mapAgentStep,
+  mapAgentReflect,
+  mapAgentToolCall,
+  finalizeAgentSteps,
+} from "@/lib/agentStepMappers";
 
 interface Message {
   id: string;
@@ -561,22 +569,7 @@ function MessageBubble({ message }: { message: Message }) {
   );
 }
 
-// ===== Phase 6.9: Agent Trace 事件映射辅助函数 =====
-
-function nodeNameToKind(node: string): AgentStepKind {
-  switch (node) {
-    case "router": return "router";
-    case "self_rag_judge": return "self_rag";
-    case "llm_only_answer": return "llm_only";
-    case "retrieve":
-    case "retrieval":
-      return "retrieve";
-    case "agentic_rag": return "think";
-    case "evaluator": return "reflect";
-    case "replan": return "replan";
-    default: return "router";
-  }
-}
+// ===== Phase 6.9: Agent Trace 事件映射（薄包装，调 lib/agentStepMappers 的纯函数） =====
 
 function pushStep(
   session: { messages: Message[] },
@@ -598,25 +591,7 @@ function appendAgentTrace(
   data: Record<string, unknown>,
   forceUpdate: (s: any) => void,
 ) {
-  const node = (data.node as string) || "unknown";
-  const status = (data.status as "running" | "completed" | "failed") || "started";
-  const ts = (data.ts as number) || Date.now();
-
-  pushStep(
-    session,
-    assistantId,
-    {
-      id: `trace-${ts}-${Math.random().toString(36).slice(2, 6)}`,
-      kind: nodeNameToKind(node),
-      node,
-      title: "",
-      detail: "",
-      status,
-      ts,
-      payload: data.payload as Record<string, unknown> | undefined,
-    },
-    forceUpdate,
-  );
+  pushStep(session, assistantId, mapAgentTrace(data), forceUpdate);
 }
 
 function appendAgentStep(
@@ -625,56 +600,14 @@ function appendAgentStep(
   data: Record<string, unknown>,
   forceUpdate: (s: any) => void,
 ) {
-  const iteration = data.iteration as number | undefined;
-  const ts = (data.ts as number) || Date.now();
-
-  // 找同 iteration 的 running think step，in-place 更新；找不到则 append
-  const messages = session.messages;
-  const idx = messages.findIndex((m) => m.id === assistantId);
+  const idx = session.messages.findIndex((m) => m.id === assistantId);
   if (idx === -1) return;
-  const msg = messages[idx];
-  const steps = [...(msg.steps || [])];
-
-  if (iteration !== undefined) {
-    const existingIdx = steps.findIndex(
-      (s) => s.iteration === iteration && s.kind === "think" && s.status !== "completed",
-    );
-    if (existingIdx >= 0) {
-      steps[existingIdx] = {
-        ...steps[existingIdx],
-        thoughtPreview: (data.thought_preview as string) || steps[existingIdx].thoughtPreview,
-        action: (data.action as any) || steps[existingIdx].action,
-        observationPreview: (data.observation_preview as string) || steps[existingIdx].observationPreview,
-        status: "completed",
-        ts,
-      };
-      session.messages = messages.map((m, i) =>
-        i === idx ? { ...m, steps } : m
-      );
-      forceUpdate({});
-      return;
-    }
-  }
-
-  // 否则新增一个 step
-  pushStep(
-    session,
-    assistantId,
-    {
-      id: `step-${ts}-${Math.random().toString(36).slice(2, 6)}`,
-      kind: "think",
-      node: "agentic_rag",
-      title: "",
-      detail: "",
-      status: "completed",
-      iteration,
-      ts,
-      thoughtPreview: data.thought_preview as string | undefined,
-      action: data.action as any,
-      observationPreview: data.observation_preview as string | undefined,
-    },
-    forceUpdate,
+  const msg = session.messages[idx];
+  const nextSteps = mapAgentStep(data, msg.steps || []);
+  session.messages = session.messages.map((m, i) =>
+    i === idx ? { ...m, steps: nextSteps } : m,
   );
+  forceUpdate({});
 }
 
 function appendAgentReflect(
@@ -683,23 +616,7 @@ function appendAgentReflect(
   data: Record<string, unknown>,
   forceUpdate: (s: any) => void,
 ) {
-  const ts = (data.ts as number) || Date.now();
-  pushStep(
-    session,
-    assistantId,
-    {
-      id: `reflect-${ts}`,
-      kind: "reflect",
-      node: "evaluator",
-      title: `评分 ${data.score}/5${data.need_replan ? " → 触发重新规划" : ""}`,
-      detail: (data.reason as string) || "",
-      status: "completed",
-      ts,
-      score: data.score as number,
-      needReplan: data.need_replan as boolean,
-    },
-    forceUpdate,
-  );
+  pushStep(session, assistantId, mapAgentReflect(data), forceUpdate);
 }
 
 function appendAgentToolCall(
@@ -708,39 +625,20 @@ function appendAgentToolCall(
   data: Record<string, unknown>,
   forceUpdate: (s: any) => void,
 ) {
-  const ts = (data.ts as number) || Date.now();
-  pushStep(
-    session,
-    assistantId,
-    {
-      id: `tool-${ts}-${Math.random().toString(36).slice(2, 6)}`,
-      kind: "tool_call",
-      node: "agentic_rag",
-      title: `调用 ${data.tool}`,
-      detail: "",
-      status: "completed",
-      iteration: data.iteration as number | undefined,
-      ts,
-      action: { tool: data.tool as string, args: (data.args as Record<string, unknown>) || {} },
-      observationPreview: data.output_preview as string | undefined,
-    },
-    forceUpdate,
-  );
+  pushStep(session, assistantId, mapAgentToolCall(data), forceUpdate);
 }
 
-function finalizeAgentSteps(
+function _finalizeAgentSteps(
   session: { messages: Message[] },
   assistantId: string,
   forceUpdate: (s: any) => void,
 ) {
   session.messages = session.messages.map((m) => {
     if (m.id !== assistantId) return m;
-    return {
-      ...m,
-      steps: (m.steps || []).map((s) =>
-        s.status === "running" ? { ...s, status: "completed" as const } : s
-      ),
-    };
+    return { ...m, steps: finalizeAgentSteps(m.steps || []) };
   });
   forceUpdate({});
 }
+
+// 保留旧名兼容（handleStream 引用 finalizeAgentSteps）
+const finalizeAgentStepsFn = _finalizeAgentSteps;
