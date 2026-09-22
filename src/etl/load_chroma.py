@@ -76,11 +76,15 @@ def load_to_chroma(
             metadatas=[
                 {
                     "doc_id": row.doc_id,
-                    "source": row.source,
-                    "game": row.game,
+                    "institution": row.institution if row.institution else "",
+                    "report_type": row.report_type if row.report_type else "",
+                    "effective_date": row.effective_date if row.effective_date else "",
+                    "product_name": row.product_name if row.product_name else "",
+                    "product_code": row.product_code if row.product_code else "",
                     "title": row.title or "",
-                    "section_title": row.section_title or "",
-                    "url": row.url or "",
+                    "filename": row.filename or "",
+                    "category": row.category if row.category else "",
+                    "page_num": int(row.page_num) if row.page_num else 0,
                 }
                 for row in batch.itertuples()
             ],
