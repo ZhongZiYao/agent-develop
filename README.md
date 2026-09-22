@@ -1,260 +1,351 @@
-# GameGuide AI
+# FinGuide AI · 银行理财 RAG 问答系统
 
-> 基于 RAG 的游戏攻略智能问答系统
+> 基于 LangChain + LangGraph 的银行理财产品智能问答系统，覆盖 22 家银行 2 万+ 公告 PDF 的真实金融场景。
 
-一个完整的检索增强生成（RAG）应用，支持从游戏攻略文档中智能检索并生成回答。采用 LangChain 框架、向量数据库检索、LLM 生成，提供 Web 界面和流式响应。
+[![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Tests](https://img.shields.io/badge/Tests-28_passed-brightgreen.svg)](tests/)
+[![POC](https://img.shields.io/badge/POC-100_PDF-success.svg)](docs/phase8-5-端到端验证.md)
 
-## ✨ 核心特性
+---
 
-- **智能检索**：基于语义向量的相似度检索，自动定位相关文档片段
-- **流式生成**：Server-Sent Events (SSE) 实时流式返回，提升用户体验
-- **引用溯源**：每个回答标注原始文档来源，可追溯验证
-- **多 LLM 支持**：支持 Ollama 本地模型和 MiniMax 云端 API
-- **会话管理**：SQLite 持久化会话历史，支持多轮对话上下文
-- **前后端分离**：FastAPI 后端 + Next.js 前端，Docker Compose 一键部署
+## 🎯 项目亮点
+
+| 维度 | 能力 |
+|------|------|
+| **真实场景** | 22 家银行 23,229 份理财 PDF（产品说明书 / 业绩基准调整 / 定期报告 / 费率公告）|
+| **RAG 全链路** | PDF ETL → 表格感知切分 → Hybrid 召回（向量 + BM25 + Rerank）→ LLM 生成 |
+| **多 Agent 协作** | LangGraph Router / ReAct / Reflexion / Self-RAG 闸门 / Supervisor 多 Agent |
+| **可观测** | SSE 实时 Trace 推送 + 前端 AgentSteps 时间线 + DuckDB 数仓审计 |
+| **合规** | Prompt 100% 必带风险提示，专有名词原文保留，业绩基准附带生效日期 |
+| **PDF 工程** | PyMuPDF 双引擎 + 双命名 regex + 目录 fallback + DuckDB 三表存储 |
+
+---
 
 ## 🛠 技术栈
 
-### 后端
-- **框架**：FastAPI + Pydantic
-- **RAG 引擎**：LangChain + LangGraph（实验中）
-- **向量数据库**：Chroma（本地持久化）
-- **Embedding**：Ollama bge-m3 (1024 维)
-- **LLM**：Ollama qwen3:8b / MiniMax API
-- **会话存储**：SQLite + SQLAlchemy
-- **流式响应**：SSE (Server-Sent Events)
+| 层级 | 选型 |
+|------|------|
+| **LLM** | Ollama 本地 qwen3:8b / 国产云端 MiniMax（reasoning=True） |
+| **Embedding** | Ollama 本地 bge-m3（1024 维） |
+| **Reranker** | bge-reranker-large |
+| **向量库** | Chroma（PersistentClient） |
+| **数仓** | DuckDB（dwd.documents / dwd.chunks / dwd.embeddings 三表） |
+| **BM25** | rank_bm25 |
+| **PDF 解析** | PyMuPDF（fitz）+ 表格感知切分 |
+| **框架** | LangChain + LangGraph（StateGraph 多 Agent） |
+| **后端** | FastAPI + SSE 流式 |
+| **前端** | Next.js 14 (App Router) + TypeScript + Tailwind（indigo 配色） |
+| **评测** | RAGAS |
+| **追踪** | LangSmith + SSE Trace |
 
-### 前端
-- **框架**：Next.js 14 (App Router) + TypeScript
-- **UI 库**：Tailwind CSS + shadcn/ui
-- **状态管理**：React Hooks
-- **流式渲染**：EventSource API
+---
 
-### 部署
-- **容器化**：Docker + Docker Compose
-- **反向代理**：内置健康检查和热重载
-
-## 📁 项目结构
+## 🏗 架构总览
 
 ```
-RAG_system/
-├── src/                     # Python 后端源码
-│   ├── api/                 # FastAPI 路由和端点
-│   ├── loaders/             # 文档加载器（Markdown/HTML）
-│   ├── splitters/           # 文本切分策略
-│   ├── embeddings/          # Embedding 封装
-│   ├── vectorstore/         # Chroma 向量库
-│   ├── retrievers/          # 检索器
-│   ├── rerankers/           # 重排序（规划中）
-│   ├── prompts/             # Prompt 模板
-│   ├── storage/             # 会话存储
-│   ├── graphs/              # LangGraph 工作流（开发中）
-│   ├── pipeline.py          # RAG 主流程
-│   ├── llm.py               # LLM 客户端
-│   └── config.py            # 配置管理
-├── web/                     # Next.js 前端
-│   ├── src/app/             # 页面路由
-│   ├── src/components/      # React 组件
-│   └── src/lib/             # API 客户端
+┌─────────────────────────────────────────────────────────────────┐
+│                   用户 → Next.js 14 (Tailwind)                 │
+│                  ┌─────────────────────────────┐               │
+│                  │   MetadataBadge 五色标签      │  ← 机构/类型/日期/编号/产品
+│                  │   AgentSteps 时间线           │  ← Self-RAG / Router / ReAct
+│                  └─────────────────────────────┘               │
+└─────────────────────────────┬───────────────────────────────────┘
+                              │ SSE 流式
+┌─────────────────────────────▼───────────────────────────────────┐
+│                FastAPI + LangGraph StateGraph                  │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐        │
+│  │  Router  │─▶│ ReAct    │─▶│ Reflexion│─▶│ Generate │        │
+│  └──────────┘  └──────────┘  └──────────┘  └──────────┘        │
+│        │             │             │             │              │
+│        ▼             ▼             ▼             ▼              │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐        │
+│  │Self-RAG  │  │ Hybrid   │  │ Rerank   │  │ qwen3:8b │        │
+│  │ 闸门     │  │ 召回     │  │ 重排     │  │ 生成     │        │
+│  └──────────┘  └──────────┘  └──────────┘  └──────────┘        │
+└─────────────────────────────┬───────────────────────────────────┘
+                              │
+┌─────────────────────────────▼───────────────────────────────────┐
+│                   PDF ETL 流水线（金融域特化）                   │
+│                                                                  │
+│  ┌────────────┐    ┌────────────┐    ┌────────────┐             │
+│  │  PyMuPDF   │──▶│ 表格感知    │──▶│ Embedding  │             │
+│  │  双引擎    │    │ 切分器     │    │ 16 并发     │             │
+│  └────────────┘    └────────────┘    └────────────┘             │
+│         │                  │                │                    │
+│         ▼                  ▼                ▼                    │
+│  ┌────────────┐    ┌────────────┐    ┌────────────┐             │
+│  │ DuckDB     │    │ Chroma     │    │ BM25       │             │
+│  │ dwd 3表    │    │ 向量索引   │    │ 关键词索引 │             │
+│  └────────────┘    └────────────┘    └────────────┘             │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### RAG 演进路径
+
+```
+Naive RAG (Phase 1)
+   └─▶ Advanced RAG + Hybrid + Rerank + RAGAS (Phase 2)
+       └─▶ Modular 抽象 + 配置化 (Phase 3)
+           └─▶ Agentic RAG + Router + ReAct + Reflexion (Phase 4)
+               └─▶ Multi-Agent + Memory + 工具扩展 + 并行 (Phase 5)
+                   └─▶ Self-RAG + SSE Trace + AgentSteps 可视化 (Phase 6)
+                       └─▶ ETL 流水线（金融域 PDF） (Phase 8) ⭐
+```
+
+---
+
+## 📁 目录结构
+
+```
+finguide-ai/
+├── docs/                       # 项目文档（PRD / 架构 / Phase 报告）
 ├── data/
-│   ├── raw/                 # 原始攻略文档
-│   ├── chroma/              # 向量库持久化
-│   └── gameguide.db         # 会话数据库
-├── scripts/                 # 工具脚本
-│   ├── rebuild_index.py     # 重建索引
-│   └── cli_query.py         # 命令行测试
-├── tests/                   # 单元测试和集成测试
-├── docs/                    # 架构文档和 ADR
-├── docker-compose.yml       # 容器编排
-└── README.md
+│   ├── 理财文件/                 # 23,229 PDF（22 家银行）
+│   ├── clean/                   # ETL 中间产物（gitignore）
+│   ├── chroma/                  # 向量库（gitignore）
+│   └── warehouse/               # DuckDB（gitignore）
+├── src/
+│   ├── loaders/                 # pdf_loader 双引擎（PyMuPDF + 双 regex + 目录 fallback）
+│   ├── splitters/               # pdf_table_splitter（页面 + 段落 + 长段分句）
+│   ├── embeddings/              # Ollama bge-m3
+│   ├── vectorstore/             # Chroma 封装
+│   ├── retrievers/              # 向量 + BM25 + Hybrid (RRF)
+│   ├── rerankers/               # bge-reranker-large
+│   ├── prompts/                 # 金融 Prompt（强制风险提示）
+│   ├── agents/                  # LangGraph Agent（Self-RAG / ReAct / Reflexion）
+│   ├── graphs/                  # StateGraph 多 Agent
+│   ├── etl/                     # transform_pdf / load_duckdb_financial / load_chroma
+│   ├── api/                     # FastAPI（含 graph_routes SSE）
+│   └── storage/                 # SQLite Session / Memory
+├── scripts/
+│   ├── etl_financial_poc.py     # 100 PDF POC 一键跑通
+│   ├── etl_financial_full.py    # 全量 ETL（分批 + 增量 + 并发）
+│   ├── scan_pdfs.py             # PDF 扫描 + POC 选取
+│   └── cli_query.py             # CLI 问答
+├── tests/                       # pytest 单测（28+ passed）
+│   ├── unit/                    # test_pdf_loader / test_pdf_splitter / test_pdf_etl
+│   └── integration/             # 端到端集成测试
+├── web/                         # Next.js 14 前端
+│   └── src/components/
+│       ├── MetadataBadge.tsx    # 5 类金融元数据标签
+│       ├── AgentSteps.tsx       # SSE Trace 时间线
+│       └── Markdown.tsx         # GFM Markdown 渲染
+├── eval/                        # RAGAS 评测脚本
+├── configs/                     # YAML 配置
+├── docker-compose.yml
+└── CLAUDE.md                    # Claude Code 项目记忆
 ```
+
+---
 
 ## 🚀 快速开始
 
 ### 方式 1：Docker Compose（推荐）
 
-**前置要求**：宿主机已安装 Ollama 并拉取模型
-
 ```bash
-# 1. 准备 Ollama 模型（Windows/Mac 宿主机）
-ollama pull bge-m3          # Embedding 模型
-ollama pull qwen3:8b        # 生成模型
+# 1. 准备 Ollama 模型
+ollama pull bge-m3          # Embedding
+ollama pull qwen3:8b        # 生成
 
-# 2. 启动服务
+# 2. 启动
 docker compose up -d --build
 
-# 3. 构建索引（首次运行）
-docker exec -it gameguide-api python scripts/rebuild_index.py
+# 3. 构建索引（首次）
+docker exec -it finguide-api python scripts/etl_financial_poc.py
 
-# 4. 访问应用
+# 4. 访问
 # Web UI: http://localhost:3000
-# API 文档: http://localhost:8000/docs
+# API:    http://localhost:8000/docs
 ```
 
 ### 方式 2：本地开发
 
 ```bash
-# 1. 安装依赖
+# 1. 安装
 pip install -r requirements.txt
 cd web && npm install && cd ..
 
-# 2. 配置环境变量
+# 2. 配置
 cp .env.example .env
-# 编辑 .env 配置 Ollama 或 MiniMax
+# 编辑 .env 配置 Ollama / 国产云端 LLM / PDF_DATA_DIR
 
-# 3. 构建索引
-python scripts/rebuild_index.py
+# 3. ETL 一键跑通
+python scripts/etl_financial_poc.py     # 100 PDF POC
+# 或全量
+python -m scripts.etl_financial_full --workers 32
 
-# 4. 启动后端
-uvicorn src.api.main:app --reload --port 8000
-
-# 5. 启动前端（新终端）
-cd web && npm run dev
+# 4. 启动
+uvicorn src.api.main:app --reload --port 8000  # 后端
+cd web && npm run dev                          # 前端
 ```
 
-## 📖 使用示例
+---
 
-### Web 界面
+## 💡 使用示例
 
-访问 http://localhost:3000，输入问题即可获得实时流式回答：
+### Web 界面（indigo 配色 + Metadata Badge）
 
 ```
-Q: 妖刀姬怎么连招？
-A: 妖刀姬的基础连招为：长按 C 键进入妖刀形态 → 1 技能「刃返」突进 → 
-   2 段普攻 → 大招「妖刀斩」。完整连招需配合 0.5 秒窗口取消...
-   
-   [引用来源：阴阳师妖刀姬攻略.md]
+Q: 招银理财 24GS5969 当前业绩基准是多少？
+
+A: ## 业绩基准
+| 项目 | 数值 |
+|------|------|
+| 业绩比较基准 | 2.30% - 3.50% |
+| 生效日期 | 2026-08-20 |
+| 来源 | 工银理财业绩比较基准调整公告 |
+
+> 理财非存款，产品过往业绩不预示未来表现。投资有风险，决策需谨慎。
+
+[参考资料]
+[1] 标题：工银理财·鑫悦最短持有30天...     [Badge: 🏛 A01工银理财 · 📄 业绩比较基准调整 · 📅 2026-08-20 · #️⃣ 24GS5969]
 ```
 
-### 命令行测试
+### CLI 问答
 
 ```bash
-# 同步查询
-python scripts/cli_query.py "红蝶怎么玩？"
-
-# 流式输出
-python scripts/cli_query.py "E-4048 错误码" --stream
+python scripts/cli_query.py "招银理财 24GS5969 的业绩基准是多少？"
+python scripts/cli_query.py "工银理财最新产品说明书" --stream
 ```
 
-### API 调用
+### API（SSE 流式 + Trace 推送）
 
 ```bash
-# 健康检查
-curl http://localhost:8000/api/v1/health
-
-# 同步查询
-curl -X POST http://localhost:8000/api/v1/chat \
+curl -N -X POST http://localhost:8000/api/v1/chat-graph/stream \
   -H "Content-Type: application/json" \
-  -d '{"query": "妖刀姬连招", "session_id": "test"}'
+  -d '{"query": "中银理财业绩比较基准调整公告", "top_k": 10, "top_n": 5}'
 
-# 流式查询（SSE）
-curl -N http://localhost:8000/api/v1/chat/stream \
-  -H "Content-Type: application/json" \
-  -d '{"query": "红蝶技能", "session_id": "test"}'
+# 响应（SSE）：
+# event: agent_trace     → {node: "router", status: "started"}
+# event: agent_trace     → {node: "self_rag_judge", status: "completed", payload: {need_retrieval: true}}
+# event: retrieval       → {docs: [...]}
+# event: agent_step      → {iteration: 1, thought_preview: "...", action: {tool: "rag_search"}}
+# event: agent_reflect   → {score: 4.2, need_replan: false}
+# event: generation      → token-by-token 流式回答
+# event: done            → {total_steps: 5, trace_events: [...]}
 ```
 
-## 🏗 架构设计
-
-### RAG 流程
-
-```
-用户查询
-   ↓
-1. Embedding（bge-m3）
-   ↓
-2. 向量检索（Chroma top_k=10）
-   ↓
-3. 上下文构建（top_n=5）
-   ↓
-4. Prompt 组装（System + User + Context）
-   ↓
-5. LLM 生成（qwen3:8b / MiniMax）
-   ↓
-6. 流式返回 + 引用溯源
-```
-
-### 会话管理
-
-- **SessionStore**：SQLite 存储会话元数据和历史消息
-- **多轮对话**：自动加载最近 N 轮历史作为上下文
-- **并发安全**：异步 SQLAlchemy 引擎
-
-### 进阶特性（开发中）
-
-- **LangGraph 集成**：状态图工作流，支持 Checkpoint 断点续传
-- **Reranker**：计划引入重排序提升召回精度
-- **多 Agent**：计划实现工具调用和多 Agent 协作
+---
 
 ## 🧪 测试
 
 ```bash
-# 单元测试
+# 单元测试（28+ 测试，PDF Loader / Splitter / ETL 全覆盖）
 pytest tests/unit/ -v
 
-# 集成测试（需要 Ollama 运行）
+# 集成测试（需要 Ollama + Chroma 运行）
 INTEGRATION_TESTS=1 pytest tests/integration/ -v
-
-# 覆盖率报告
-pytest --cov=src --cov-report=html
 ```
 
-## 📊 配置说明
+测试覆盖：
+- ✅ PDF Loader 双 regex + 目录 fallback + 真实 PDF 加载
+- ✅ 表格感知切分器（页面 / 段落 / 长段分句）
+- ✅ ETL 幂等 DELETE+INSERT
+- ✅ DuckDB schema 完整性
+- ✅ Chroma 写入 + metadata 字段
 
-关键环境变量（`.env`）：
+---
 
-```bash
-# LLM 配置
-LLM_PROVIDER=ollama              # ollama / minimax
-LLM_MODEL=qwen3:8b
-LLM_BASE_URL=http://localhost:11434
-LLM_TEMPERATURE=0.1
-LLM_REASONING=true               # 启用思维链
+## 📊 量化成果（Phase 8 POC）
 
-# Embedding 配置
-OLLAMA_EMBED_MODEL=bge-m3
-OLLAMA_EMBED_DIM=1024
+| 指标 | 数值 |
+|------|------|
+| 真实 PDF 数据 | 23,229 份 / 8.1 GB / 22 家银行 |
+| POC 端到端 | 100 PDF → 48 docs / 662 chunks / 662 vectors < 5min |
+| Chunk 平均大小 | 500 字符（chunk_size=500, overlap=50） |
+| Embedding 吞吐 | 16-32 并发，bge-m3 1024 维 |
+| 召回策略 | 向量 + BM25 + Rerank 三路混合 |
+| 单测覆盖 | 28 passed（PDF/Splitter/ETL 全模块） |
+| 风险提示 | Prompt 硬约束 100% 必带 |
 
-# 检索参数
-TOP_K=10                         # 召回候选数
-TOP_N=5                          # 实际使用文档数
+---
 
-# 向量库
-CHROMA_PERSIST_DIR=./data/chroma
-CHROMA_COLLECTION_NAME=gameguide
+## 🎓 关键技术亮点
+
+### 1. PDF 元数据抽取（双 regex + 目录 fallback）
+
+```python
+# 文件名标准 regex
+INSTITUTION_DATE_TYPE_PRODUCT.pdf
+例：工银理财_2026-08-20_临时性信息披露_关于工银理财·鑫悦最短持有30天...pdf
+
+# 文件名变体 regex（招银理财等）
+INSTITUTION_REPORT_TYPE_(DATE)_DESCRIPTION.pdf
+例：招银理财_2026-08-18_重大事项公告_关于...（2026年8月18日）.pdf
+
+# 目录 fallback（最权威）
+data/理财文件/A01工银理财/产品说明书/*.pdf
+data/理财文件/招银理财/临时报告/新设份额/*.pdf
 ```
+
+### 2. LangGraph 多 Agent + Self-RAG
+
+```python
+StateGraph:
+  START → Router → SelfRAGJudge
+                       │
+                       ├─ need_retrieval=true ─▶ RouteDecision
+                       │                              │
+                       │                              ├─ 闲聊 / 简单 → DirectRAG → Generate
+                       │                              └─ 复杂 / 多跳 → AgenticRAG
+                       │                                                  │
+                       │                                                  ├─ ReActLoop → ToolCall → Reflect
+                       │                                                  ├─ Reflexion (Evaluator → Replan)
+                       │                                                  └─ Generate (LLM)
+                       │
+                       └─ need_retrieval=false ─▶ LLMOnlyAnswer
+```
+
+### 3. DuckDB 数仓三表
+
+```sql
+dwd.documents:   doc_id, institution, report_type, effective_date,
+                 product_name, product_code, title, filename, ...
+dwd.chunks:      chunk_id, doc_id, chunk_text, page_num, chunk_index
+dwd.embeddings:  chunk_id, embedding (1024 维 float32), model
+```
+
+幂等模式：`DELETE WHERE source='pdf_local' + INSERT`，可重复跑。
+
+### 4. SSE Trace 时间线（前端 AgentSteps）
+
+```
+🔀 Router → 🔍 Self-RAG 判断需要检索 → 🔎 召回 5 篇 →
+💭 第1轮思考 → 🛠 rag_search → 👁 观察 →
+⭐ 反思 4.2 分无需重规划 → ✅ 生成完成
+```
+
+---
 
 ## 📝 开发进度
 
-### 已完成 ✅
+### ✅ Phase 0–6：核心 RAG + Agent
+Naive → Advanced (Hybrid + Rerank + RAGAS) → Modular → Agentic → Multi-Agent → Self-RAG + SSE Trace
 
-- [x] 文档加载和切分（Markdown/HTML）
-- [x] 向量索引构建和持久化
-- [x] 语义检索和上下文构建
-- [x] LLM 生成和流式响应
-- [x] FastAPI 后端（同步 + 流式端点）
-- [x] Next.js 前端 UI
-- [x] 会话管理和历史记录
-- [x] Docker 容器化部署
-- [x] 健康检查和索引状态监控
+### ✅ Phase 7–8：金融域改造 ⭐
+- ✅ 清理游戏 ETL 残留 / 改名 finguide
+- ✅ PDF Loader 双引擎 + 表格感知 Splitter
+- ✅ 100 PDF POC 端到端跑通（5 min）
+- ✅ Prompt 金融化（风险提示 100%）
+- ✅ 前端 Metadata Badge 5 色标签
+- ✅ CLAUDE.md / PRD / Phase 报告 重写
+- ✅ 28 个单测全绿
 
-### 进行中 🚧
+### 📅 Phase 9：技术博客 + 面试 STAR
+- [ ] RAGAS 金融评测集 50 题
+- [ ] 全量 23,229 PDF ETL 跑通（embedding 并发优化后）
+- [ ] 技术博客 6000 字
+- [ ] 面试 STAR 准备
 
-- [ ] LangGraph StateGraph 集成（Checkpoint 持久化）
-- [ ] 前端多会话状态管理
-- [ ] Feature Flag 灰度发布机制
+详见 [`docs/phase8-完成报告.md`](docs/phase8-完成报告.md) 与 [`docs/phase8-5-端到端验证.md`](docs/phase8-5-端到端验证.md)。
 
-### 规划中 📅
+---
 
-- [ ] Reranker 重排序（BM25 / Cross-Encoder）
-- [ ] RAGAS 评测框架
-- [ ] LangSmith 追踪和调试
-- [ ] Multi-Agent 工具调用
-- [ ] 缓存优化和性能调优
+## 📄 License
+
+MIT License — 仅供学习和个人项目使用
 
 ## 🤝 贡献
 
 欢迎提 Issue 和 PR！
-
-## 📄 License
-
-MIT License - 仅供学习和个人项目使用
