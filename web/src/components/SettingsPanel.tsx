@@ -16,7 +16,17 @@ interface Props {
   setTopN: (v: number) => void;
 }
 
-const GAMES = ["", "永劫无间", "第五人格", "逆水寒"];
+const INSTITUTIONS = [
+  "",
+  "A01工银理财",
+  "A03中银理财",
+  "A05交银理财",
+  "B01招银理财",
+  "B03中信理财",
+  "B05浦银理财",
+  "B07民生理财",
+  "B09广银理财",
+];
 
 export function SettingsPanel({
   onClose,
@@ -72,17 +82,17 @@ export function SettingsPanel({
         </div>
 
         <div className="p-4 space-y-6">
-          {/* Game Filter */}
+          {/* Institution Filter */}
           <div>
             <label className="text-sm font-medium text-gray-700 mb-2 block">
-              游戏过滤
+              机构过滤
             </label>
             <select
               value={game}
               onChange={(e) => setGame(e.target.value)}
               className="w-full px-3 py-2 border rounded-lg"
             >
-              {GAMES.map((g) => (
+              {INSTITUTIONS.map((g) => (
                 <option key={g} value={g}>
                   {g || "全部"}
                 </option>

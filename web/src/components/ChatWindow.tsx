@@ -46,10 +46,10 @@ interface Props {
 }
 
 const EXAMPLE_QUERIES = [
-  "妖刀姬 S13 怎么连招？",
-  "E-4048 错误码怎么解决？",
-  "红蝶怎么玩？",
-  "素问在副本里站什么位置？",
+  "招银理财 24GS5969 的业绩基准是多少？",
+  "工银理财产品说明书怎么查？",
+  "中银理财业绩比较基准调整公告",
+  "浦银理财新设份额的费率是多少？",
 ];
 
 export function ChatWindow({ game, useStream, topK, topN, sessionId, onSessionCreated }: Props) {
@@ -417,7 +417,7 @@ export function ChatWindow({ game, useStream, topK, topN, sessionId, onSessionCr
             value={input}
             onChange={(e) => setInput(e.target.value)}
             disabled={loading}
-            placeholder="问点什么吧…比如「妖刀姬 S13 怎么连招？」"
+            placeholder="问点理财相关的问题吧…比如「招银理财 24GS5969 的业绩基准是多少？」"
             className="flex-1 px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:bg-gray-50"
           />
           {loading && currentSession.abortController && (
@@ -435,7 +435,7 @@ export function ChatWindow({ game, useStream, topK, topN, sessionId, onSessionCr
                 }
               }}
               className="px-4 py-3 bg-red-500 text-white rounded-xl hover:bg-red-600 flex items-center gap-2"
-              title="取消当前会话的请求"
+              title="取消当前咨询的请求"
             >
               <X className="w-4 h-4" />
             </button>
@@ -464,10 +464,10 @@ function EmptyState() {
         <Sparkles className="w-8 h-8 text-white" />
       </div>
       <h2 className="text-2xl font-semibold text-gray-900 mb-2">
-        开始对话吧
+        开始咨询吧
       </h2>
       <p className="text-gray-500 max-w-md">
-        GameGuide AI 基于 RAG 检索游戏攻略文档，回答准确、附带引用来源。
+        FinGuide AI 基于 RAG 检索银行理财公告与产品说明书，覆盖 22 家机构、附带引用来源与风险提示。
       </p>
     </div>
   );
@@ -479,7 +479,7 @@ function MessageBubble({ message }: { message: Message }) {
     <div className={`flex gap-3 animate-slide-up ${isUser ? "justify-end" : "justify-start"}`}>
       {!isUser && (
         <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary-500 to-accent-500 flex-shrink-0 flex items-center justify-center text-white text-sm font-semibold">
-          G
+          F
         </div>
       )}
       <div className={`flex flex-col max-w-2xl ${isUser ? "items-end" : "items-start"}`}>

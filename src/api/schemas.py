@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 class QueryRequest(BaseModel):
     """问答请求"""
     query: str = Field(..., min_length=1, max_length=2000, description="用户问题")
-    game: Optional[str] = Field(None, description="游戏过滤")
+    game: Optional[str] = Field(None, description="机构过滤（如 B01招银理财，留空=全部）")
     top_k: int = Field(10, ge=1, le=100)
     top_n: int = Field(5, ge=1, le=20)
     session_id: Optional[str] = Field(None, description="会话 ID（传入则注入历史）")

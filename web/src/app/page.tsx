@@ -4,11 +4,11 @@ import { useState } from "react";
 import { ChatWindow } from "@/components/ChatWindow";
 import { SettingsPanel } from "@/components/SettingsPanel";
 import { Sidebar } from "@/components/Sidebar";
-import { Settings, Menu } from "lucide-react";
+import { Settings, Menu, Landmark, FileText } from "lucide-react";
 
 export default function Home() {
   const [showSettings, setShowSettings] = useState(false);
-  const [game, setGame] = useState<string>("");
+  const [institution, setInstitution] = useState<string>("");
   const [useStream, setUseStream] = useState(true);
   const [topK, setTopK] = useState(10);
   const [topN, setTopN] = useState(5);
@@ -46,43 +46,49 @@ export default function Home() {
       {/* Main */}
       <main className="flex-1 flex flex-col">
         {/* Header */}
-        <header className="flex items-center justify-between px-6 py-3 border-b bg-white/60 backdrop-blur-sm">
+        <header className="flex items-center justify-between px-6 py-3 border-b border-indigo-100 bg-gradient-to-r from-indigo-50/80 to-white/60 backdrop-blur-sm">
           <div className="flex items-center gap-3">
             <button
               onClick={() => setSidebarOpen(!sidebarOpen)}
-              className="p-2 hover:bg-gray-100 rounded-lg"
+              className="p-2 hover:bg-indigo-50 rounded-lg"
             >
-              <Menu className="w-5 h-5" />
+              <Menu className="w-5 h-5 text-indigo-700" />
             </button>
-            <div>
-              <h1 className="text-lg font-semibold text-gray-900">
-                GameGuide AI
-              </h1>
-              <p className="text-xs text-gray-500">
-                基于 RAG 的游戏攻略问答 · Phase 1.5 Session + Memory
-              </p>
+            <div className="flex items-center gap-2">
+              <div className="p-1.5 bg-primary-600 rounded-lg shadow-sm">
+                <Landmark className="w-4 h-4 text-white" />
+              </div>
+              <div>
+                <h1 className="text-lg font-semibold text-gray-900">
+                  FinGuide AI
+                </h1>
+                <p className="text-xs text-gray-500">
+                  银行理财产品智能问答 · 招银/工银/中银/浦银/民生 等 22 家机构
+                </p>
+              </div>
             </div>
           </div>
           <div className="flex items-center gap-2">
             <button
               onClick={handleNewChat}
-              className="px-3 py-1.5 text-sm bg-primary-600 text-white rounded-lg hover:bg-primary-700"
+              className="px-3 py-1.5 text-sm bg-primary-600 text-white rounded-lg hover:bg-primary-700 shadow-sm flex items-center gap-1.5"
             >
-              新对话
+              <FileText className="w-4 h-4" />
+              新咨询
             </button>
             <button
               onClick={() => setShowSettings(true)}
-              className="p-2 hover:bg-gray-100 rounded-lg"
+              className="p-2 hover:bg-indigo-50 rounded-lg"
               title="设置"
             >
-              <Settings className="w-5 h-5 text-gray-600" />
+              <Settings className="w-5 h-5 text-indigo-700" />
             </button>
           </div>
         </header>
 
         {/* Chat */}
         <ChatWindow
-          game={game}
+          game={institution}
           useStream={useStream}
           topK={topK}
           topN={topN}
@@ -95,8 +101,8 @@ export default function Home() {
       {showSettings && (
         <SettingsPanel
           onClose={() => setShowSettings(false)}
-          game={game}
-          setGame={setGame}
+          game={institution}
+          setGame={setInstitution}
           useStream={useStream}
           setUseStream={setUseStream}
           topK={topK}

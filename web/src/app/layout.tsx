@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "GameGuide AI",
-  description: "基于 RAG 的游戏攻略问答助手",
+  title: "FinGuide AI",
+  description: "银行理财产品智能问答助手 · 招银/工银/中银/浦银/民生 等 22 家机构",
 };
 
 export default function RootLayout({

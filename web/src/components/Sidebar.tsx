@@ -176,12 +176,12 @@ export function Sidebar({
       <div className="flex-1 overflow-y-auto p-3">
         <div className="flex items-center justify-between mb-2 px-1">
           <h3 className="text-xs font-semibold text-gray-500 uppercase">
-            会话 ({sessions.length})
+            咨询记录 ({sessions.length})
           </h3>
           <button
             onClick={handleNewSession}
             className="p-1 rounded hover:bg-primary-50 text-primary-600"
-            title="新建会话"
+            title="新建咨询"
           >
             <Plus className="w-4 h-4" />
           </button>
@@ -194,7 +194,7 @@ export function Sidebar({
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="搜索会话..."
+            placeholder="搜索咨询记录..."
             className="w-full pl-8 pr-3 py-1.5 text-xs border border-gray-200 rounded-md focus:outline-none focus:ring-1 focus:ring-primary-500"
           />
           {searchQuery && (
@@ -207,19 +207,19 @@ export function Sidebar({
           )}
         </div>
 
-        {/* 新对话按钮（大） */}
+        {/* 新建咨询按钮（大） */}
         <button
           onClick={handleNewSession}
           className="w-full mb-3 px-3 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 flex items-center justify-center gap-2 text-sm"
         >
           <Plus className="w-4 h-4" />
-          新对话
+          新咨询
         </button>
 
         {/* 列表 */}
         {sessions.length === 0 ? (
           <div className="text-center text-xs text-gray-400 py-6">
-            {searchQuery ? "未找到匹配的会话" : "还没有会话，点击\"新对话\"开始"}
+            {searchQuery ? "未找到匹配的咨询" : "还没有咨询记录，点击\"新咨询\"开始"}
           </div>
         ) : (
           <div className="space-y-3">
@@ -433,9 +433,9 @@ function SessionItem({
                   "truncate",
                   active ? "font-medium text-gray-900" : "text-gray-700"
                 )}
-                title={session.title || "新对话"}
+                title={session.title || "新咨询"}
               >
-                {session.title || "新对话"}
+                {session.title || "新咨询"}
               </div>
               <div className="text-[10px] text-gray-400 mt-0.5 flex items-center gap-1">
                 <span>{session.message_count} 条</span>
