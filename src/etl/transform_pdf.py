@@ -120,7 +120,9 @@ def transform_pdfs_to_chunks(
     # 清理旧 tmp 文件（如果上次中断）
     if tmp_path.exists():
         tmp_path.unlink()
-    df.to_parquet(tmp_path, engine="pyarrow", index=False)
+    df.to_parquet(str(tmp_path), engine="pyarrow", index=False)
+    if output_parquet.exists():
+        output_parquet.unlink()
     tmp_path.rename(output_parquet)
 
     size_mb = output_parquet.stat().st_size / 1e6
