@@ -40,6 +40,7 @@ data/raw/jsonl/       # Phase 7: 爬虫落盘 JSONL
 data/clean/           # Phase 7: ETL 中间产物
 data/warehouse/       # Phase 7: DuckDB 数仓
 data/qdrant/          # Phase 7: Qdrant 数据卷
+data/理财文件/         # Phase 8: 23,229 理财 PDF（8.1GB），不入 git
 *.bin
 *.safetensors
 *.pkl
