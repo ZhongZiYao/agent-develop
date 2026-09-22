@@ -6,12 +6,13 @@
 特性：
     - 使用 Ollama HTTP API（本地或远程）
     - 无需下载 HuggingFace 模型
-    - 批量请求（batch_size 可配置）
+    - **并发请求**（ThreadPoolExecutor，max_workers 默认 16）— 大幅提速
     - 断点续跑：写入临时文件，结束后 rename
 """
 from __future__ import annotations
 
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import numpy as np
@@ -42,12 +43,12 @@ def load_chunks_parquet(path: Path = CLEAN_DIR / "chunks.parquet") -> pd.DataFra
     return df
 
 
-def embed_text_ollama(text: str, model: str = OLLAMA_EMBED_MODEL) -> list[float]:
+def embed_text_ollama(text: str, model: str = OLLAMA_EMBED_MODEL, timeout: int = 60) -> list[float]:
     """调用 Ollama API 生成单个文本的 embedding。"""
     url = f"{OLLAMA_BASE_URL}/api/embeddings"
     payload = {"model": model, "prompt": text}
     try:
-        resp = requests.post(url, json=payload, timeout=30)
+        resp = requests.post(url, json=payload, timeout=timeout)
         resp.raise_for_status()
         data = resp.json()
         return data.get("embedding", [])
@@ -59,14 +60,16 @@ def embed_text_ollama(text: str, model: str = OLLAMA_EMBED_MODEL) -> list[float]
 def embed_chunks(
     chunks_df: pd.DataFrame,
     model: str = OLLAMA_EMBED_MODEL,
-    batch_size: int = 16,
+    batch_size: int = 32,
+    max_workers: int = 16,
 ) -> pd.DataFrame:
-    """主入口：Ollama API 批量 embedding。
+    """主入口：Ollama API 并发 embedding。
 
     Args:
         chunks_df: 含 chunk_id + chunk_text 列
         model: Ollama 模型名
-        batch_size: 批量大小（Ollama API 是串行，这里用于进度显示）
+        batch_size: 进度显示的批量大小
+        max_workers: 并发线程数（默认 16，CPU-bound 时建议 8-32）
 
     Returns:
         含 chunk_id + embedding (list[float32]) + model
@@ -74,17 +77,40 @@ def embed_chunks(
     texts = chunks_df["chunk_text"].tolist()
     chunk_ids = chunks_df["chunk_id"].tolist()
 
-    logger.info(f"开始 embedding {len(texts)} 个 chunks (model={model})...")
+    logger.info(f"开始 embedding {len(texts)} 个 chunks (model={model}, workers={max_workers})...")
 
-    embeddings = []
-    for text in tqdm(texts, desc="Embedding"):
-        emb = embed_text_ollama(text, model=model)
-        if emb:
-            embeddings.append(np.array(emb, dtype=np.float32).tolist())
-        else:
-            # 失败时填充零向量
-            logger.warning(f"Embedding 失败，使用零向量")
-            embeddings.append([0.0] * EMBEDDING_DIM)
+    # 预分配结果数组（按 chunk_id 顺序）
+    embeddings: list[list[float] | None] = [None] * len(texts)
+
+    # ThreadPoolExecutor 并发跑
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # 提交所有任务
+        future_to_idx = {
+            executor.submit(embed_text_ollama, text, model): idx
+            for idx, text in enumerate(texts)
+        }
+
+        # 收集结果 + 进度条
+        completed = 0
+        with tqdm(total=len(texts), desc="Embedding") as pbar:
+            for future in as_completed(future_to_idx):
+                idx = future_to_idx[future]
+                try:
+                    result = future.result()
+                    embeddings[idx] = result if result else [0.0] * EMBEDDING_DIM
+                except Exception:
+                    embeddings[idx] = [0.0] * EMBEDDING_DIM
+                completed += 1
+                if completed % batch_size == 0:
+                    pbar.update(batch_size)
+            # 最后一批
+            if completed % batch_size != 0:
+                pbar.update(completed % batch_size)
+
+    # 兜底：任何 None 替换为零向量
+    for i in range(len(embeddings)):
+        if embeddings[i] is None:
+            embeddings[i] = [0.0] * EMBEDDING_DIM
 
     result_df = pd.DataFrame(
         {

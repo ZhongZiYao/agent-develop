@@ -5,17 +5,18 @@
 - 增量更新：扫描已处理的 doc_id 跳过（基于 DuckDB）
 - 失败隔离：单文件失败不影响整批
 - 资源监控：每 100 文件报告一次吞吐
+- **Embedding 并发**：默认 16 个并发请求（替代串行）
 
 用法：
     python -m scripts.etl_financial_full                 # 全量
     python -m scripts.etl_financial_full --batch 2000    # 自定义批大小
     python -m scripts.etl_financial_full --limit 5000    # 只跑前 N 个
+    python -m scripts.etl_financial_full --workers 32    # 自定义 embedding 并发
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import time
 from pathlib import Path
 
@@ -63,6 +64,7 @@ def run_full_pipeline(
     incremental: bool = True,
     skip_embed: bool = False,
     skip_chroma: bool = False,
+    workers: int = 16,
 ):
     """跑全量 ETL。"""
     started = time.time()
@@ -106,7 +108,6 @@ def run_full_pipeline(
         t0 = time.time()
 
         try:
-            # 写中间 parquet（每批覆盖）
             tmp_parquet = CLEAN_DIR / f"_chunks_batch_{batch_no:04d}.parquet"
             transform_pdfs_to_chunks(
                 pdf_dir=batch,
@@ -115,7 +116,6 @@ def run_full_pipeline(
             if tmp_parquet.exists():
                 df = pd.read_parquet(tmp_parquet)
                 all_chunks.append(df)
-                # 清理中间文件
                 tmp_parquet.unlink()
                 elapsed = time.time() - t0
                 logger.info(
@@ -134,7 +134,6 @@ def run_full_pipeline(
     chunks_df = pd.concat(all_chunks, ignore_index=True)
     logger.info(f"Transform 汇总: {len(chunks_df)} chunks from {len(all_pdfs) - total_failed} docs")
 
-    # 写最终 chunks.parquet
     chunks_parquet = CLEAN_DIR / "chunks.parquet"
     chunks_parquet.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = chunks_parquet.with_suffix(".parquet.tmp")
@@ -155,10 +154,10 @@ def run_full_pipeline(
             return
     else:
         logger.info("=" * 60)
-        logger.info(f"Step 2/4: Embedding (Ollama bge-m3) — {len(chunks_df)} chunks")
+        logger.info(f"Step 2/4: Embedding (Ollama bge-m3) — {len(chunks_df)} chunks, workers={workers}")
         logger.info("=" * 60)
         t0 = time.time()
-        embeddings_df = embed_chunks(chunks_df)
+        embeddings_df = embed_chunks(chunks_df, max_workers=workers)
         embeddings_parquet = save_embeddings(embeddings_df, out_path=CLEAN_DIR / "embeddings.parquet")
         elapsed = time.time() - t0
         logger.info(f"Embedding 耗时: {elapsed:.1f}s ({len(chunks_df)/elapsed:.1f} chunks/s)")
@@ -195,6 +194,7 @@ def main():
     parser.add_argument("--no-incremental", action="store_true", help="关闭增量（重新跑所有）")
     parser.add_argument("--skip-embed", action="store_true", help="跳过 embedding")
     parser.add_argument("--skip-chroma", action="store_true", help="跳过 Chroma 同步")
+    parser.add_argument("--workers", type=int, default=16, help="embedding 并发线程数（默认 16）")
     args = parser.parse_args()
 
     run_full_pipeline(
@@ -203,6 +203,7 @@ def main():
         incremental=not args.no_incremental,
         skip_embed=args.skip_embed,
         skip_chroma=args.skip_chroma,
+        workers=args.workers,
     )
 
 
