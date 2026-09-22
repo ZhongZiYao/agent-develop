@@ -44,7 +44,7 @@ class Settings(BaseSettings):
 
     # ===== Vector Store =====
     chroma_persist_dir: str = Field(default=str(PROJECT_ROOT / "data" / "chroma"))
-    chroma_collection_name: str = Field(default="gameguide")
+    chroma_collection_name: str = Field(default="finguide")
 
     # ===== 数据 =====
     raw_data_dir: str = Field(default=str(PROJECT_ROOT / "data" / "raw"))
@@ -84,7 +84,7 @@ class Settings(BaseSettings):
     # ===== LangSmith（可选） =====
     langsmith_tracing: bool = Field(default=False)
     langsmith_api_key: str = Field(default="")
-    langsmith_project: str = Field(default="gameguide-ai")
+    langsmith_project: str = Field(default="finguide-ai")
 
     # ===== 调试 =====
     debug: bool = Field(default=False)
@@ -104,31 +104,20 @@ class Settings(BaseSettings):
 
     # DuckDB 数仓
     warehouse_dir: str = Field(default=str(PROJECT_ROOT / "data" / "warehouse"))
-    duckdb_path: str = Field(default=str(PROJECT_ROOT / "data" / "warehouse" / "gameguide.duckdb"))
+    duckdb_path: str = Field(default=str(PROJECT_ROOT / "data" / "warehouse" / "finguide.duckdb"))
 
     # Qdrant sidecar
     qdrant_host: str = Field(default="localhost")
     qdrant_port: int = Field(default=6333)
-    qdrant_collection_name: str = Field(default="gameguide_phase7")
+    qdrant_collection_name: str = Field(default="finguide_phase8")
 
-    # Chroma Phase 7 新 collection
-    chroma_phase7_collection: str = Field(default="gameguide_phase7")
+    # Chroma Phase 8 新 collection
+    chroma_phase7_collection: str = Field(default="finguide_phase8")
 
-    # Embedding 模型（Phase 7 用本地 HuggingFace）
-    embedding_model: str = Field(default="BAAI/bge-m3", description="HuggingFace sentence-transformers 模型名")
-    embedding_dim: int = Field(default=1024)
-    embedding_device: str = Field(default="cuda", description="cuda / cpu / mps")
-    embedding_batch_size: int = Field(default=32, description="GPU 推荐 32 / CPU 推荐 8")
-    embedding_fp16: bool = Field(default=True, description="GPU 推理 FP16")
-
-    # Scrapy 爬虫限速
-    crawl_download_delay: float = Field(default=1.5, description="单请求间隔（秒）")
-    crawl_concurrent_per_domain: int = Field(default=2)
-
-    # ETL 转换参数
-    etl_chunk_size: int = Field(default=500)
-    etl_chunk_overlap: int = Field(default=50)
-    etl_min_quality_score: float = Field(default=0.3, description="低于此分丢弃")
+    # ===== Phase 8 PDF ETL（理财文件） =====
+    pdf_data_dir: str = Field(default=str(PROJECT_ROOT / "data" / "理财文件"), description="理财 PDF 根目录")
+    pdf_min_text_chars: int = Field(default=100, description="PDF 文本小于此值视为扫描件，尝试 OCR/丢弃")
+    pdf_max_pages: int = Field(default=80, description="单 PDF 最大页数（避免巨型报告卡住 ETL）")
 
 
 @lru_cache(maxsize=1)
