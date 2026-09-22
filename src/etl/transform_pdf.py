@@ -29,7 +29,7 @@ import pandas as pd
 from loguru import logger
 
 from src.config import settings
-from src.loaders.pdf_loader import load_pdf_dir
+from src.loaders.pdf_loader import load_pdf_dir, load_pdf_files
 from src.splitters.pdf_table_splitter import split_pdf_documents
 
 
@@ -37,7 +37,7 @@ CLEAN_DIR = Path(settings.data_dir) / "clean"
 
 
 def transform_pdfs_to_chunks(
-    pdf_dir: Path | str,
+    pdf_dir: Path | str | list[Path | str] | None = None,
     output_parquet: Path | str | None = None,
     limit: int | None = None,
     chunk_size: int | None = None,
@@ -46,7 +46,7 @@ def transform_pdfs_to_chunks(
     """完整 transform: PDF → Documents → Chunks → parquet。
 
     Args:
-        pdf_dir: PDF 目录
+        pdf_dir: PDF 目录 OR 显式 PDF 路径列表 (POC 用)
         output_parquet: 输出 parquet 路径 (默认 data/clean/chunks.parquet)
         limit: 限制加载文件数（POC 用）
         chunk_size / chunk_overlap: 覆盖 settings
@@ -54,20 +54,27 @@ def transform_pdfs_to_chunks(
     Returns:
         输出 parquet 路径
     """
-    pdf_dir = Path(pdf_dir)
     output_parquet = Path(output_parquet) if output_parquet else CLEAN_DIR / "chunks.parquet"
 
     logger.info(f"=== Transform 开始 ===")
-    logger.info(f"PDF 目录: {pdf_dir}")
+    logger.info(f"PDF 源: {pdf_dir}")
     logger.info(f"限制文件数: {limit or '全部'}")
 
-    # 1. 加载 PDF
-    docs = load_pdf_dir(
-        pdf_dir,
-        limit=limit,
-        min_text_chars=settings.pdf_min_text_chars,
-        max_pages=settings.pdf_max_pages,
-    )
+    # 1. 加载 PDF（支持目录或显式路径列表）
+    if isinstance(pdf_dir, list):
+        docs = load_pdf_files(
+            pdf_dir,
+            min_text_chars=settings.pdf_min_text_chars,
+            max_pages=settings.pdf_max_pages,
+        )
+    else:
+        pdf_dir = Path(pdf_dir)
+        docs = load_pdf_dir(
+            pdf_dir,
+            limit=limit,
+            min_text_chars=settings.pdf_min_text_chars,
+            max_pages=settings.pdf_max_pages,
+        )
     if not docs:
         logger.warning("未加载到任何 PDF")
         return output_parquet
@@ -110,6 +117,9 @@ def transform_pdfs_to_chunks(
     # 4. 落 parquet
     output_parquet.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = output_parquet.with_suffix(".parquet.tmp")
+    # 清理旧 tmp 文件（如果上次中断）
+    if tmp_path.exists():
+        tmp_path.unlink()
     df.to_parquet(tmp_path, engine="pyarrow", index=False)
     tmp_path.rename(output_parquet)
 
