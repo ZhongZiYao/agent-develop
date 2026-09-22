@@ -118,6 +118,8 @@ class Settings(BaseSettings):
     pdf_data_dir: str = Field(default=str(PROJECT_ROOT / "data" / "理财文件"), description="理财 PDF 根目录")
     pdf_min_text_chars: int = Field(default=100, description="PDF 文本小于此值视为扫描件，尝试 OCR/丢弃")
     pdf_max_pages: int = Field(default=80, description="单 PDF 最大页数（避免巨型报告卡住 ETL）")
+    pdf_chunk_size: int = Field(default=500, description="PDF chunk 大小（字符数）")
+    pdf_chunk_overlap: int = Field(default=50, description="PDF chunk 重叠")
 
 
 @lru_cache(maxsize=1)
