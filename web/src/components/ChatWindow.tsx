@@ -13,6 +13,7 @@ import {
 import { Markdown } from "./Markdown";
 import { ThinkingPanel } from "./ThinkingPanel";
 import { AgentSteps, AgentStep, AgentStepKind } from "./AgentSteps";
+import { MetadataBadge } from "./MetadataBadge";
 import {
   nodeNameToKind,
   mapAgentTrace,
@@ -548,7 +549,8 @@ function MessageBubble({ message }: { message: Message }) {
                   <div className="font-medium text-gray-700">
                     [{i + 1}] {doc.title}
                   </div>
-                  <div className="text-gray-500 line-clamp-2">{doc.content}</div>
+                  <MetadataBadge metadata={doc.metadata} />
+                  <div className="text-gray-500 line-clamp-2 mt-1">{doc.content}</div>
                   <div className="text-gray-400 text-[10px] mt-1">
                     score: {doc.score.toFixed(3)} · {doc.source.split("/").pop()}
                   </div>
