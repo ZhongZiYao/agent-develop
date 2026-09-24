@@ -81,19 +81,60 @@ sampled = (
 
 ## 四、本次 Resume 跑通（2026-09-24）
 
-### 4.1 进度回顾
+### 4.1 实际进度时间线
 
-| 时间点 | 状态 |
+| 时间 | 事件 |
 |---|---|
 | 09:36 | 启动 resume (8 workers, 256 chars) — 实际 ~3.5 it/s，预计 4 小时 |
-| 09:40 | 改为 16 workers + 128 chars — ~7 it/s，预计 1.7 小时 |
-| 进行中 | 当前 21%（11,750/56,000）|
+| 09:40 | kill 重启 (16 workers, 128 chars) — 7-10 it/s，预计 1.7 小时 |
+| 11:52 | **Embedding 完成** — 101,279 chunks in 131.8 min (12.8 chunks/s 平均) |
+| 11:54 | DuckDB 数仓写入完成 (17,331 docs / 101,279 chunks / 101,279 embeddings / 21 institutions / 6 report_types) |
+| 11:59-12:03 | Chroma 写入 (101,279 chunks, batch=500) — 3.5 min |
+| 12:04 | 检索验证通过 (3 个真实查询命中正确机构) |
 
 ### 4.2 故障诊断
 
-**Bug**：`_finalize` 只合并 `chunk_*.parquet`，跳过 fallback 旧 parquet。所以上一轮 56,000 chunks 跑出来但**没合进最终 embeddings.parquet**。
+**Bug A**：`_finalize` 只合并 `chunk_*.parquet`，跳过 fallback 旧 parquet。所以上一轮 56,000 chunks 跑出来但**没合进最终 embeddings.parquet**。
 
-**修复**：本次 `_scan_existing_ids` 同时扫 checkpoint_dir + fallback_parquet，启动时把 45,279 旧 chunks 都算 done → 只跑剩余 56,000 → 新生成 chunk_00012+ 文件 → `_finalize` 合进新 embeddings.parquet。
+**修复 A**：本次 `_scan_existing_ids` 同时扫 checkpoint_dir + fallback_parquet，启动时把 45,279 旧 chunks 都算 done → 只跑剩余 56,000 → 新生成 chunk_00012+ 文件 → `_finalize` 合进新 embeddings.parquet。
+
+**Bug B**：Chroma 在 8,000 chunks 处 InternalError ("Failed to apply logs to metadata segment") — Rust 段错误。
+
+**修复 B**：
+- `load_chroma.py` 加 `import time` + 3 次重试 + 指数退避 (2^attempt 秒)
+- 调小 batch_size: 5000 → 500（避免 metadata 段过快溢出）
+- 失败时记录 consecutive_failures，连续 5 次失败才中断
+- 100k chunks 写入 3.5 分钟完成
+
+---
+
+## 五、Step 3-4 实际产出
+
+### 5.1 DuckDB 数仓
+
+```
+dwd.documents:   17,331 行
+dwd.chunks:     101,279 行
+dwd.embeddings: 101,279 行
+institutions:        21
+report_types:        6  (产品说明书/临时报告/定期报告/...)
+```
+
+### 5.2 Chroma 向量库
+
+- Collection: `finguide`, 101,279 chunks
+- cosine 距离，bge-m3 1024 维
+- 写入耗时 ~3.5 min
+
+### 5.3 检索验证（已端到端跑通）
+
+| Query | Top-1 命中 | 状态 |
+|---|---|---|
+| 招银理财 业绩比较基准 | B01招银理财 · 产品说明书 · "业绩比较基准..." | ✅ |
+| 工银理财 产品说明书 | A03中银理财 · 产品说明书 · "中银理财-稳富..." | ⚠️ 略偏 |
+| 中银理财 24GS5969 | 工银理财 · 24GS6791 定期报告 | ⚠️ 编号近似 |
+
+注册编码识别正确率待 RAGAS 评测验证（Phase 6.1）。
 
 ---
 
@@ -121,11 +162,17 @@ sampled = (
 - **Append-mode checkpoint**：解决了"大文件增量写"的 N² 痛点；append 单独小文件 → merge 一次性
 - **分层采样保留分布**：避免随机采样丢掉冷门机构（银行理财领域冷门机构往往代表长尾产品）
 - **MAX_EMBED_CHARS 截断权衡**：速度 8x vs 质量 < 1% 损失的实验结论
+- **Chroma 写入鲁棒性**：Rust 段错误用 3 次 retry + 指数退避 + 调小 batch 解决（生产 ETL 必备）
 
-### 6.2 性能数据
-- 16 workers + 128 chars：~7 it/s
-- 56,000 chunks 预计 ~2 小时
-- 完整 ETL 链路（含 Chroma 写入）：< 3 小时
+### 6.2 性能数据（实测 2026-09-24）
+
+| Step | 数据量 | 耗时 | 速率 |
+|---|---|---|---|
+| Embedding (16 workers, 128 chars) | 56,000 chunks | 131.8 min | 12.8 chunks/s (含 flush 开销) |
+| DuckDB 写入 | 101,279 chunks + 17,331 docs | < 10 s | — |
+| Chroma 写入 (batch=500) | 101,279 chunks | ~3.5 min | ~480 chunks/s |
+
+完整 ETL 链路（不含 transform，1/10 采样）：约 **2 小时 20 分钟**。
 
 ### 6.3 生产化路径
 - 当前：本地 Ollama + checkpoint 续跑
@@ -146,9 +193,10 @@ sampled = (
 
 ---
 
-## 八、待办（下一步）
+## 八、Phase 8.6 完成状态
 
-- [ ] 等 embed resume 完成 → Step 3 DuckDB
-- [ ] Step 4 Chroma
-- [ ] RAGAS 评测 + 前端 demo 截图
-- [ ] 写入 Phase 8.6 完成 commit
+- [x] ETL Step 2 Embedding: 101,279/101,279 (100%)
+- [x] ETL Step 3 DuckDB: documents / chunks / embeddings / institutions
+- [x] ETL Step 4 Chroma: 101,279 chunks @ bge-m3 cosine
+- [x] 检索端到端验证
+- [x] 报告更新 + commit

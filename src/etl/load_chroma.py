@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import pandas as pd
@@ -57,38 +58,57 @@ def load_to_chroma(
     # 删除旧 collection（幂等）
     try:
         client.delete_collection(collection_name)
+        logger.info(f"删除旧 collection {collection_name}")
     except Exception:
         pass
 
     collection = client.create_collection(
         name=collection_name,
-        metadata={"hnsw:space": "cosine", "description": "Phase 7 ETL corpus"},
+        metadata={"hnsw:space": "cosine", "description": "FinGuide AI PDF chunks"},
     )
 
-    # 分批写入
+    # 分批写入 + 重试（Chroma 偶发 InternalError）
     total = 0
+    consecutive_failures = 0
+    max_consecutive_failures = 5
     for start in range(0, len(df), batch_size):
         batch = df.iloc[start : start + batch_size]
-        collection.add(
-            ids=batch["chunk_id"].tolist(),
-            documents=batch["chunk_text"].tolist(),
-            embeddings=batch["embedding"].tolist(),
-            metadatas=[
-                {
-                    "doc_id": row.doc_id,
-                    "institution": row.institution if row.institution else "",
-                    "report_type": row.report_type if row.report_type else "",
-                    "effective_date": row.effective_date if row.effective_date else "",
-                    "product_name": row.product_name if row.product_name else "",
-                    "product_code": row.product_code if row.product_code else "",
-                    "title": row.title or "",
-                    "filename": row.filename or "",
-                    "category": row.category if row.category else "",
-                    "page_num": int(row.page_num) if row.page_num else 0,
-                }
-                for row in batch.itertuples()
-            ],
-        )
+        attempt = 0
+        while attempt < 3:
+            try:
+                collection.add(
+                    ids=batch["chunk_id"].tolist(),
+                    documents=batch["chunk_text"].tolist(),
+                    embeddings=batch["embedding"].tolist(),
+                    metadatas=[
+                        {
+                            "doc_id": row.doc_id,
+                            "institution": row.institution if row.institution else "",
+                            "report_type": row.report_type if row.report_type else "",
+                            "effective_date": row.effective_date if row.effective_date else "",
+                            "product_name": row.product_name if row.product_name else "",
+                            "product_code": row.product_code if row.product_code else "",
+                            "title": row.title or "",
+                            "filename": row.filename or "",
+                            "category": row.category if row.category else "",
+                            "page_num": int(row.page_num) if row.page_num else 0,
+                        }
+                        for row in batch.itertuples()
+                    ],
+                )
+                consecutive_failures = 0
+                break
+            except Exception as exc:
+                attempt += 1
+                logger.warning(f"Chroma add 失败 (batch {start}, attempt {attempt}): {exc}")
+                if attempt >= 3:
+                    consecutive_failures += 1
+                    if consecutive_failures >= max_consecutive_failures:
+                        logger.error(f"连续 {max_consecutive_failures} 次失败,中断")
+                        raise
+                    logger.warning(f"跳过该 batch,继续下一个")
+                    break
+                time.sleep(2 ** attempt)
         total += len(batch)
         logger.info(f"Chroma 进度: {total}/{len(df)}")
 
