@@ -93,7 +93,8 @@ dependencies = [
 # ===== GPU 推理（核心：bge-m3 + Reranker）=====
 gpu = [
     "sentence-transformers>=2.7.0",
-    "torch>=2.2.0",  # PyTorch CUDA 12.x，由 uv 解析具体 wheel
+    "torch>=2.2.0",  # PyTorch CUDA 13.0 wheel（来源见 [tool.uv.sources]）
+    "FlagEmbedding>=1.2.0",  # Phase 8.7: BGE 官方库，GPU 推理 bge-m3
 ]
 
 # ===== Airflow（独立装，避免污染主环境）=====
@@ -120,12 +121,23 @@ dev = [
 ]
 
 [tool.uv]
+# Phase 8.7: RTX 5070 (sm_120) 需要 cu130 wheel
+# 否则 uv 会从 PyPI 拉 torch-2.14.0 (CPU only)
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
 dev-dependencies = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
     "pytest-cov>=4.1.0",
     "ruff>=0.3.0",
 ]
+
+# Phase 8.7: torch 强制从 cu130 索引拉 GPU 版 wheel
+[tool.uv.sources]
+torch = { index = "pytorch-cu130" }
 
 # ===== ruff 配置 =====
 [tool.ruff]

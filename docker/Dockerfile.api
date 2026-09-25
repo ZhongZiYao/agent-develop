@@ -18,10 +18,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 复制代码
+# 复制代码（不 COPY data/ — 数据通过 docker-compose volume 挂载）
 COPY src/ ./src/
 COPY scripts/ ./scripts/
-COPY data/ ./data/
 COPY .env.example .env.example
 
 # 健康检查

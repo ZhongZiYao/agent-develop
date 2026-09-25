@@ -2,7 +2,7 @@
 
 特性：
 - 持久化到本地磁盘
-- 自动管理 embeddings 客户端（Ollama）
+- 自动管理 embeddings 客户端（BGE FlagEmbedding，Phase 8.7 后）
 - 支持 add / search / count / reset
 - 返回带 score 的 RetrievalResult
 """
@@ -15,7 +15,7 @@ import chromadb
 from chromadb.config import Settings as ChromaSettings
 
 from ..config import settings
-from ..embeddings.ollama_embed import get_embeddings
+from ..embeddings.bge_embed import get_embeddings
 from ..schemas import Chunk, RetrievalResult
 
 
