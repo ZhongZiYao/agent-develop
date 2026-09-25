@@ -127,7 +127,7 @@ def generate(
 
     history_text = format_history(history or [])
 
-    user_prompt = build_user_prompt(query, context_chunks, game)
+    user_prompt = build_user_prompt(query, context_chunks, game or "")
     if history_text:
         # 把 history 插到参考资料之前
         user_prompt = history_text + user_prompt

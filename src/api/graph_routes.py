@@ -94,8 +94,13 @@ async def _persist_turn(
     thinking: str,
     retrieved_docs: list[dict],
     is_first_turn: bool,
+    rename_queue: asyncio.Queue | None = None,
 ) -> None:
-    """持久化一轮对话（user + assistant）到 SessionStore"""
+    """持久化一轮对话（user + assistant）到 SessionStore
+
+    Phase 8.7.2 修复：当 is_first_turn=True 时，调度后台 LLM 命名任务。
+    命名完成后通过 rename_queue 推 session_renamed 事件给 SSE 流（如果有）。
+    """
     if not session_id:
         return
 
@@ -118,8 +123,51 @@ async def _persist_turn(
                 thinking=thinking or None,
                 retrieved_docs=retrieved_docs,
             )
+
+        # 首轮触发智能命名（后台异步，不阻塞持久化）
+        if is_first_turn:
+            await _schedule_session_renaming(
+                session_id=session_id,
+                query=query,
+                retrieved_docs=retrieved_docs,
+                rename_queue=rename_queue,
+            )
     except Exception as exc:
         logger.warning(f"Failed to persist turn for session {session_id}: {exc}")
+
+
+async def _schedule_session_renaming(
+    session_id: str,
+    query: str,
+    retrieved_docs: list[dict],
+    rename_queue: asyncio.Queue | None,
+) -> None:
+    """异步生成会话标题。命名完成后通过 queue 推 session_renamed 事件。
+
+    失败时静默 fallback（截取 query 前 10 字），不阻塞主流程。
+    """
+    try:
+        from ..storage.naming_v2 import generate_session_title, rename_session_async
+
+        context_text = "\n".join(
+            (doc.get("content") or "")[:200]
+            for doc in (retrieved_docs or [])[:3]
+        )
+
+        title = await generate_session_title(query, context=context_text)
+        if title:
+            await rename_session_async(session_id, title)
+            # 推送给 SSE 流（如果有）
+            if rename_queue is not None:
+                try:
+                    rename_queue.put_nowait({
+                        "session_id": session_id,
+                        "title": title,
+                    })
+                except asyncio.QueueFull:
+                    logger.debug(f"[Naming] queue full, drop renamed event for {session_id}")
+    except Exception as exc:
+        logger.warning(f"[Naming] rename task failed for {session_id}: {exc}")
 
 
 @router.post("/chat-graph", response_model=QueryResponse)
@@ -160,6 +208,18 @@ async def chat_graph(req: QueryRequest):
         latency_ms = (time.time() - start) * 1000
         response = _graph_state_to_response(result, trace_id, latency_ms)
 
+        # 首轮判断（动态查询，避免重复命名）
+        first_turn = False
+        if req.session_id:
+            try:
+                async with AsyncSessionLocal() as db:
+                    store = SessionStore(db)
+                    sess = await store.get_session(req.session_id, include_messages=False)
+                    if sess and sess.get("message_count", 0) == 0:
+                        first_turn = True
+            except Exception:
+                pass
+
         # 持久化（后端不阻塞响应）
         asyncio.create_task(
             _persist_turn(
@@ -168,7 +228,7 @@ async def chat_graph(req: QueryRequest):
                 result.get("answer", ""),
                 result.get("thinking", ""),
                 result.get("retrieved_docs", []),
-                is_first_turn=True,
+                is_first_turn=first_turn,
             )
         )
 
@@ -230,6 +290,21 @@ async def _stream_events(
     """
     trace_id = f"{trace_prefix}-{uuid.uuid4().hex[:12]}"
     start = time.time()
+
+    # 首轮判断（必须在 astream 之前查，否则 message_count 已被自身 +2）
+    is_first_turn = False
+    if req.session_id:
+        try:
+            async with AsyncSessionLocal() as db:
+                store = SessionStore(db)
+                sess = await store.get_session(req.session_id, include_messages=False)
+                if sess and sess.get("message_count", 0) == 0:
+                    is_first_turn = True
+        except Exception as exc:
+            logger.debug(f"[{trace_id}] is_first_turn check skipped: {exc}")
+
+    # 命名事件队列（命名任务完成后塞这里，stream 末尾 drain）
+    rename_queue: asyncio.Queue = asyncio.Queue(maxsize=8)
 
     try:
         input_state = {
@@ -379,17 +454,29 @@ async def _stream_events(
             ),
         }
 
-        # 异步持久化
-        asyncio.create_task(
-            _persist_turn(
-                req.session_id,
-                req.query,
-                full_answer,
-                full_thinking,
-                state_values.get("retrieved_docs", []),
-                is_first_turn=False,
-            )
+        # 持久化 + 首轮命名（await，但已在 done 之后，不影响 SSE 收尾）
+        await _persist_turn(
+            req.session_id,
+            req.query,
+            full_answer,
+            full_thinking,
+            state_values.get("retrieved_docs", []),
+            is_first_turn=is_first_turn,
+            rename_queue=rename_queue,
         )
+
+        # drain rename_queue：命名已在 _persist_turn 内部完成，事件已 put_nowait
+        if is_first_turn:
+            try:
+                rename_event = await asyncio.wait_for(rename_queue.get(), timeout=0.5)
+                yield {
+                    "event": "session_renamed",
+                    "data": json.dumps(rename_event, ensure_ascii=False),
+                }
+            except asyncio.TimeoutError:
+                logger.debug(f"[{trace_id}] rename_queue empty after persist, skip SSE push")
+            except Exception as exc:
+                logger.debug(f"[{trace_id}] rename_queue drain failed: {exc}")
 
         logger.info(
             f"[{trace_id}] LangGraph stream completed in "

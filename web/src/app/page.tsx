@@ -28,8 +28,13 @@ export default function Home() {
   function handleSessionActivity(id: string) {
     setSessionId(id);
     setRefreshKey((key) => key + 1);
-    // 智能命名在后台执行，稍后再刷新一次标题。
+    // 兼容旧的兜底刷新（chat-graph 同步路径不会推 SSE）
     window.setTimeout(() => setRefreshKey((key) => key + 1), 1500);
+  }
+
+  // Phase 8.7.2: 后端 SSE 流式推送新标题，立即刷新侧栏
+  function handleSessionRenamed(_id: string, _title: string) {
+    setRefreshKey((key) => key + 1);
   }
 
   return (
@@ -94,6 +99,7 @@ export default function Home() {
           topN={topN}
           sessionId={sessionId}
           onSessionCreated={handleSessionActivity}
+          onSessionRenamed={handleSessionRenamed}
         />
       </main>
 

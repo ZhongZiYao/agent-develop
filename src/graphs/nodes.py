@@ -144,7 +144,7 @@ async def generate_node(state: RAGState) -> dict:
     user_prompt = build_user_prompt(
         query=state["query"],
         context_chunks=context_chunks,
-        game=state.get("game", ""),
+        institution=state.get("game", "") or state.get("institution", ""),
     )
 
     # LangGraph 会自动管理历史，这里只添加当前轮的 user message

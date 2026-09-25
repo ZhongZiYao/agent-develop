@@ -44,6 +44,8 @@ interface Props {
   topN: number;
   sessionId: string | null;
   onSessionCreated?: (sessionId: string) => void;
+  // Phase 8.7.2: 首轮命名完成后由后端 SSE 推送，立即回调让侧栏流式更新
+  onSessionRenamed?: (sessionId: string, title: string) => void;
 }
 
 const EXAMPLE_QUERIES = [
@@ -53,7 +55,7 @@ const EXAMPLE_QUERIES = [
   "浦银理财新设份额的费率是多少？",
 ];
 
-export function ChatWindow({ game, useStream, topK, topN, sessionId, onSessionCreated }: Props) {
+export function ChatWindow({ game, useStream, topK, topN, sessionId, onSessionCreated, onSessionRenamed }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [input, setInput] = useState("");
 
@@ -348,6 +350,13 @@ export function ChatWindow({ game, useStream, topK, topN, sessionId, onSessionCr
         } else if (event.event === "agent_done") {
           // Phase 6.9: 所有节点完成 → 把所有 running 标 completed
           finalizeAgentSteps(currentSession, assistantId, forceUpdate);
+        } else if (event.event === "session_renamed") {
+          // Phase 8.7.2: 后端首轮命名完成 → 通知 page 刷新侧栏（无需定时器兜底）
+          const sid = (event.data.session_id as string) || activeSessionId;
+          const newTitle = (event.data.title as string) || "";
+          if (sid && newTitle) {
+            onSessionRenamed?.(sid, newTitle);
+          }
         }
       }
     } catch (err: any) {

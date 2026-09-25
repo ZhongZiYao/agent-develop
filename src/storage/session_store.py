@@ -76,6 +76,13 @@ class SessionStore:
             msgs = list(msg_result.scalars().all())
             messages = [_message_to_dict(m) for m in msgs]
             message_count = len(messages)
+        else:
+            # 不加载 messages 时也要知道消息数（避免依赖 lazy load 触发 IO）
+            count_stmt = select(func.count(Message.id)).where(
+                Message.session_id == session_id
+            )
+            count_result = await self.db.execute(count_stmt)
+            message_count = count_result.scalar_one() or 0
 
         return _session_to_dict(session, message_count=message_count, messages=messages)
 
