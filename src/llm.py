@@ -55,11 +55,11 @@ def _create_llm(*, streaming: bool) -> BaseChatModel:
     provider = settings.llm_provider.lower().strip()
     if provider == "ollama":
         return _ollama_llm()
-    if provider in {"minimax", "openai"}:
+    if provider in {"minimax", "openai", "uuapi"}:
         return _openai_compatible_llm(streaming=streaming)
     raise ValueError(
         f"不支持的 LLM_PROVIDER={settings.llm_provider!r}，"
-        "可选：ollama/minimax/openai"
+        "可选：ollama/minimax/openai/uuapi"
     )
 
 
