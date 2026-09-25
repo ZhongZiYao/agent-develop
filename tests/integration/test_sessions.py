@@ -45,9 +45,9 @@ async def test_stream_persists_session_and_restores_history(monkeypatch):
     )
     monkeypatch.setattr(api_main, "get_streaming_llm", lambda: FakeStreamingLLM())
 
-    import src.storage.naming as naming
+    import src.storage.naming_v2 as naming
 
-    async def fake_title(_query: str, fallback: str | None = None) -> str:
+    async def fake_title(_query: str, context: str = "", fallback: str | None = None, max_retries: int = 2) -> str:
         return "妖刀姬技能"
 
     async def fake_rename(_session_id: str, _new_title: str) -> bool:
