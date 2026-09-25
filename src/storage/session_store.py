@@ -12,7 +12,7 @@ from typing import Any
 from sqlalchemy import select, update, delete, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import Message, Session
+from .models import Message, Session, _iso_utc
 
 
 def _session_to_dict(session: Session, message_count: int = 0, messages: list[dict] | None = None) -> dict:
@@ -20,8 +20,8 @@ def _session_to_dict(session: Session, message_count: int = 0, messages: list[di
     return {
         "id": session.id,
         "title": session.title or "新对话",
-        "created_at": session.created_at.isoformat() if session.created_at else None,
-        "updated_at": session.updated_at.isoformat() if session.updated_at else None,
+        "created_at": _iso_utc(session.created_at),
+        "updated_at": _iso_utc(session.updated_at),
         "message_count": message_count,
         "messages": messages or [],
     }
@@ -34,7 +34,7 @@ def _message_to_dict(msg: Message) -> dict:
         "content": msg.content,
         "thinking": msg.thinking,
         "retrieved_docs": msg.retrieved_docs,
-        "created_at": msg.created_at.isoformat() if msg.created_at else None,
+        "created_at": _iso_utc(msg.created_at),
     }
 
 

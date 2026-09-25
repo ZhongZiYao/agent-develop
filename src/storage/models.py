@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import ForeignKey, String, Text, DateTime, JSON
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -21,6 +21,20 @@ class Base(DeclarativeBase):
 
 def new_uuid() -> str:
     return uuid.uuid4().hex[:12]
+
+
+def _iso_utc(dt: datetime | None) -> str | None:
+    """序列化 datetime 为带 UTC 时区的 ISO 字符串。
+
+    背景：datetime.utcnow() 产生的 naive datetime 经 isoformat() 后无时区后缀，
+    前端 new Date() 会按本地时区解析，导致 UTC+8 区域会话显示偏差 8 小时。
+    修复：强制追加 '+00:00' 让前端按 UTC 解析。
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is not None:
+        return dt.isoformat()
+    return dt.replace(tzinfo=timezone.utc).isoformat()
 
 
 class Session(Base):
@@ -46,8 +60,8 @@ class Session(Base):
         data = {
             "id": self.id,
             "title": self.title or "新对话",
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "created_at": _iso_utc(self.created_at),
+            "updated_at": _iso_utc(self.updated_at),
             "message_count": len(self.messages) if self.messages else 0,
         }
         if include_messages:
@@ -78,7 +92,7 @@ class Message(Base):
             "content": self.content,
             "thinking": self.thinking,
             "retrieved_docs": self.retrieved_docs,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "created_at": _iso_utc(self.created_at),
         }
 
 
